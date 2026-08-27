@@ -4,6 +4,7 @@ import type {
   ConnectionState,
   MobileConnectionDiagnosticPath
 } from '../transport/types'
+import { normalizeHostAppVersion } from '../transport/host-app-version-store'
 import { formatEndpoint } from './host-reachability'
 import { diagnoseConnection } from './connection-diagnostics-analysis'
 import { redactConnectionLogEntry, redactConnectionLogText } from './connection-log-redaction'
@@ -19,6 +20,7 @@ export function buildConnectionDiagnosticsReport(args: {
   lastConnectedAt: number | null
   platform: string
   appVersion: string
+  desktopAppVersion?: string | null
   entries: readonly ConnectionLogEntry[]
   activePath?: MobileConnectionDiagnosticPath
   pendingPath?: MobileConnectionDiagnosticPath | null
@@ -37,6 +39,8 @@ export function buildConnectionDiagnosticsReport(args: {
   lines.push('Orca Mobile connection diagnostics')
   lines.push(`Generated: ${new Date(now).toISOString()}`)
   lines.push(`App: Orca Mobile ${args.appVersion} · ${args.platform}`)
+  const desktopAppVersion = normalizeHostAppVersion(args.desktopAppVersion)
+  lines.push(`Host Orca version: ${desktopAppVersion ?? 'unknown'}`)
   lines.push(`Host: ${redactConnectionLogText(args.hostName)}`)
   lines.push(
     `Endpoint: ${formatEndpoint(args.endpoint)}${isTailscaleEndpoint(args.endpoint) ? ' (Tailscale)' : ''}`

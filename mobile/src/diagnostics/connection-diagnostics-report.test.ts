@@ -13,6 +13,7 @@ describe('buildConnectionDiagnosticsReport', () => {
       lastConnectedAt: NOW - 5 * 60_000,
       platform: 'ios 26.5.1',
       appVersion: '0.0.29',
+      desktopAppVersion: '1.4.191',
       entries: [
         {
           id: 'log-1',
@@ -26,6 +27,7 @@ describe('buildConnectionDiagnosticsReport', () => {
     })
 
     expect(report).toContain('App: Orca Mobile 0.0.29 · ios 26.5.1')
+    expect(report).toContain('Host Orca version: 1.4.191')
     expect(report).toContain('Endpoint: 100.65.9.106:6768 (Tailscale)')
     expect(report).toContain('State: reconnecting (reconnect attempts: 12)')
     expect(report).toContain('(5m 0s ago)')
@@ -48,6 +50,7 @@ describe('buildConnectionDiagnosticsReport', () => {
     })
 
     expect(report).toContain('Endpoint: 192.168.1.50:6768')
+    expect(report).toContain('Host Orca version: unknown')
     expect(report).not.toContain('(Tailscale)')
     expect(report).toContain('Last connected: never this session')
     expect(report).toContain('No connection events recorded.')

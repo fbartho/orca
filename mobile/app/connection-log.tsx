@@ -18,6 +18,8 @@ import {
 import { buildConnectionDiagnosticsReport } from '../src/diagnostics/connection-diagnostics-report'
 import { diagnoseConnection } from '../src/diagnostics/connection-diagnostics-analysis'
 import { submitConnectionDiagnostics } from '../src/diagnostics/connection-diagnostics-submission'
+import { useHostStatusGates } from '../src/transport/host-status-gates'
+import { loadHostAppVersion } from '../src/transport/host-app-version-store'
 import type { ConnectionLogEntry, HostProfile } from '../src/transport/types'
 
 // Why: getSnapshot must be referentially stable when there's no data —
@@ -53,7 +55,12 @@ export default function ConnectionLogScreen() {
   }, [params.hostId])
 
   const selected = hosts.find((h) => h.id === selectedId) ?? null
-  const { state } = useHostClient(selected?.id)
+  const { client, state } = useHostClient(selected?.id)
+  const { desktopAppVersion: liveDesktopAppVersion } = useHostStatusGates({
+    hostId: selected?.id,
+    client,
+    connState: state
+  })
   const reconnectAttempts = useReconnectAttempt(selected?.id)
   const lastConnectedAt = useLastConnectedAt(selected?.id)
   const { activePath, pendingPath } = useConnectionPathStatus(selected?.id)
@@ -82,6 +89,7 @@ export default function ConnectionLogScreen() {
     if (!selected) {
       return
     }
+    const desktopAppVersion = liveDesktopAppVersion ?? (await loadHostAppVersion(selected.id))
     const report = buildConnectionDiagnosticsReport({
       hostName: selected.name,
       endpoint: selected.endpoint,
@@ -90,6 +98,7 @@ export default function ConnectionLogScreen() {
       lastConnectedAt,
       platform: `${Platform.OS} ${Platform.Version ?? ''}`.trim(),
       appVersion: Constants.expoConfig?.version ?? 'unknown',
+      desktopAppVersion,
       entries,
       activePath,
       pendingPath
@@ -97,7 +106,16 @@ export default function ConnectionLogScreen() {
     await Clipboard.setStringAsync(report)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
-  }, [selected, state, reconnectAttempts, lastConnectedAt, entries, activePath, pendingPath])
+  }, [
+    selected,
+    state,
+    reconnectAttempts,
+    lastConnectedAt,
+    entries,
+    activePath,
+    pendingPath,
+    liveDesktopAppVersion
+  ])
 
   const sendDiagnostics = useCallback(async () => {
     if (!selected || submissionState === 'sending') {
@@ -106,6 +124,7 @@ export default function ConnectionLogScreen() {
     setSubmissionState('sending')
     const appVersion = Constants.expoConfig?.version ?? 'unknown'
     const platform = `${Platform.OS} ${Platform.Version ?? ''}`.trim()
+    const desktopAppVersion = liveDesktopAppVersion ?? (await loadHostAppVersion(selected.id))
     const report = buildConnectionDiagnosticsReport({
       hostName: selected.name,
       endpoint: selected.endpoint,
@@ -114,6 +133,7 @@ export default function ConnectionLogScreen() {
       lastConnectedAt,
       platform,
       appVersion,
+      desktopAppVersion,
       entries,
       activePath,
       pendingPath
@@ -128,7 +148,8 @@ export default function ConnectionLogScreen() {
     lastConnectedAt,
     entries,
     activePath,
-    pendingPath
+    pendingPath,
+    liveDesktopAppVersion
   ])
 
   return (
