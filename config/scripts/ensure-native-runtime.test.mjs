@@ -78,8 +78,11 @@ describe('ensure-native-runtime', () => {
         })
 
         expect(result.status, result.stderr).toBe(0)
-        expect(readFileSync(logPath, 'utf8')).toContain(
-          'pnpm rebuild node-pty windows-native-registry\n'
+        const log = readFileSync(logPath, 'utf8')
+        expect(log).toContain('pnpm rebuild node-pty\n')
+        expect(log).toContain('pnpm exec node-gyp rebuild\n')
+        expect(log).toContain(
+          `cwd=${join(projectDir, 'node_modules', 'windows-native-registry')}\n`
         )
       } finally {
         rmSync(projectDir, { recursive: true, force: true })
@@ -273,6 +276,10 @@ function writeFakeWindowsRegistry(projectDir, { requiresMarker = false } = {}) {
   }
   const registryDir = join(projectDir, 'node_modules', 'windows-native-registry')
   mkdirSync(registryDir, { recursive: true })
+  writeFileSync(
+    join(registryDir, 'package.json'),
+    '{"name":"windows-native-registry","version":"3.2.2","main":"index.js"}\n'
+  )
   const markerGate = requiresMarker
     ? `if (!require('node:fs').existsSync(process.env.ORCA_NATIVE_TEST_MARKER)) { throw new Error('registry ABI mismatch sentinel') }`
     : ''
@@ -315,6 +322,7 @@ function writeFakePnpm(binDir) {
 const { appendFileSync, writeFileSync } = require('node:fs')
 
 appendFileSync(process.env.ORCA_NATIVE_TEST_LOG, \`pnpm \${process.argv.slice(2).join(' ')}\\n\`)
+appendFileSync(process.env.ORCA_NATIVE_TEST_LOG, \`cwd=\${process.cwd()}\\n\`)
 appendFileSync(
   process.env.ORCA_NATIVE_TEST_LOG,
   \`npm_config_build_from_source=\${process.env.npm_config_build_from_source || ''}\\n\`

@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { existsSync, readFileSync } from 'node:fs'
 import { release } from 'node:os'
-import { basename, resolve } from 'node:path'
+import { basename, dirname, resolve } from 'node:path'
 
 const require = createRequire(import.meta.url)
 const { assertNodePtyJobOwnership } = require('./node-pty-job-ownership.cjs')
@@ -72,7 +72,7 @@ function ensureNodeRuntime() {
       'node-pty',
       ...failedModules.filter((moduleName) => moduleName !== 'node-pty')
     ]
-    runPnpm(['rebuild', ...rebuildModules])
+    rebuildNodeRuntimeModules(rebuildModules)
     verifyNodeRuntimeAfterRebuild()
     return
   }
@@ -82,7 +82,7 @@ function ensureNodeRuntime() {
     `[native-runtime] ${formatRuntimeLabel('node')} cannot load native modules; rebuilding ${failedModules.join(', ')} for Node.`
   )
   printCheckError(initial)
-  runPnpm(['rebuild', ...failedModules])
+  rebuildNodeRuntimeModules(failedModules)
   verifyNodeRuntimeAfterRebuild()
 }
 
@@ -365,7 +365,21 @@ function getWindowsBuildNumber() {
   return match && match.length === 4 ? Number.parseInt(match[3], 10) : 0
 }
 
-function runPnpm(args) {
+function rebuildNodeRuntimeModules(moduleNames) {
+  if (moduleNames.includes('node-pty')) {
+    runPnpm(['rebuild', 'node-pty'])
+  }
+  for (const moduleName of moduleNames) {
+    if (moduleName === 'node-pty') {
+      continue
+    }
+    const moduleDir = dirname(require.resolve(`${moduleName}/package.json`))
+    console.warn(`[native-runtime] Rebuilding ${moduleName} with node-gyp.`)
+    runPnpm(['exec', 'node-gyp', 'rebuild'], { cwd: moduleDir })
+  }
+}
+
+function runPnpm(args, { cwd = projectDir } = {}) {
   const command = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'
   const env = { ...process.env }
   // Why: node-pty prefers its upstream prebuild, which does not contain Orca's
@@ -374,14 +388,14 @@ function runPnpm(args) {
     env.npm_config_build_from_source = 'true'
   }
   const result = spawnSync(command, args, {
-    cwd: projectDir,
+    cwd,
     stdio: 'inherit',
     shell: process.platform === 'win32',
     env
   })
 
   if (result.error || result.status !== 0) {
-    console.error(`[native-runtime] ${command} ${args.join(' ')} failed.`)
+    console.error(`[native-runtime] ${command} ${args.join(' ')} failed in ${cwd}.`)
     if (result.error) {
       console.error(formatError(result.error))
     }
