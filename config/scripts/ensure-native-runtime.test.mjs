@@ -53,6 +53,40 @@ describe('ensure-native-runtime', () => {
     }
   })
 
+  it.skipIf(process.platform !== 'win32')(
+    'rebuilds other failed Windows addons with patched node-pty',
+    () => {
+      const projectDir = mkTempProject()
+
+      try {
+        const scriptPath = join(projectDir, 'config', 'scripts', 'ensure-native-runtime.mjs')
+        const logPath = join(projectDir, 'native-runtime.log')
+        const markerPath = join(projectDir, 'rebuilt.marker')
+        const binDir = join(projectDir, 'bin')
+        copyFileSync(sourceScriptPath, scriptPath)
+        writeFakeNativeModules(projectDir, { windowsRegistryRequiresMarker: true })
+        writeNodePtyPatchFile(projectDir)
+        writeFakePnpm(binDir)
+
+        const result = spawnSync(process.execPath, [scriptPath, '--runtime=node'], {
+          cwd: projectDir,
+          encoding: 'utf8',
+          env: envWithPrependedPath(binDir, {
+            ORCA_NATIVE_TEST_LOG: logPath,
+            ORCA_NATIVE_TEST_MARKER: markerPath
+          })
+        })
+
+        expect(result.status, result.stderr).toBe(0)
+        expect(readFileSync(logPath, 'utf8')).toContain(
+          'pnpm rebuild node-pty windows-native-registry\n'
+        )
+      } finally {
+        rmSync(projectDir, { recursive: true, force: true })
+      }
+    }
+  )
+
   it.skipIf(process.platform === 'win32')(
     'rebuilds patched node-pty artifacts even when the Node load check passes',
     () => {
@@ -179,7 +213,7 @@ function envWithPrependedPath(binDir, extraEnv) {
   }
 }
 
-function writeFakeNativeModules(projectDir) {
+function writeFakeNativeModules(projectDir, { windowsRegistryRequiresMarker = false } = {}) {
   const nodePtyDir = join(projectDir, 'node_modules', 'node-pty')
   mkdirSync(join(nodePtyDir, 'lib'), { recursive: true })
 
@@ -201,7 +235,7 @@ exports.loadNativeModule = function loadNativeModule(nativeName) {
 }
 `
   )
-  writeFakeWindowsRegistry(projectDir)
+  writeFakeWindowsRegistry(projectDir, { requiresMarker: windowsRegistryRequiresMarker })
 }
 
 function writeLoadableNativeModules(projectDir, { nativeDir = null } = {}) {
@@ -233,15 +267,18 @@ exports.loadNativeModule = function loadNativeModule(nativeName) {
   writeFakeWindowsRegistry(projectDir)
 }
 
-function writeFakeWindowsRegistry(projectDir) {
+function writeFakeWindowsRegistry(projectDir, { requiresMarker = false } = {}) {
   if (process.platform !== 'win32') {
     return
   }
   const registryDir = join(projectDir, 'node_modules', 'windows-native-registry')
   mkdirSync(registryDir, { recursive: true })
+  const markerGate = requiresMarker
+    ? `if (!require('node:fs').existsSync(process.env.ORCA_NATIVE_TEST_MARKER)) { throw new Error('registry ABI mismatch sentinel') }`
+    : ''
   writeFileSync(
     join(registryDir, 'index.js'),
-    'exports.HK = { CU: 0x80000001 }; exports.getRegistryKey = () => ({})\n'
+    `exports.HK = { CU: 0x80000001 }; exports.getRegistryKey = () => { ${markerGate}; return {} }\n`
   )
   const processTreeDir = join(projectDir, 'node_modules', '@vscode', 'windows-process-tree')
   mkdirSync(processTreeDir, { recursive: true })

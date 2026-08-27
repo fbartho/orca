@@ -126,10 +126,14 @@ describe('computer-use e2e workflow', () => {
     const job = workflow.jobs['mac-native-owner-smoke']
     const runs = job.steps.map((step) => step.run).filter((run) => typeof run === 'string')
     const checkout = job.steps.find((step) => step.uses === 'actions/checkout@v6')
+    const install = job.steps.find(
+      (step) => step.uses === './.github/actions/install-node-dependencies'
+    )
 
     expect(job.if).toBe("github.event_name == 'pull_request'")
     expect(job['runs-on']).toBe('macos-15')
     expect(checkout.with['persist-credentials']).toBe(false)
+    expect(install.with['native-runtime']).toBe('electron')
     expect(runs).toContain('pnpm bench:macos-computer-helper-owner-loss --expect reaped --trials 1')
     const cleanupRun = runs.find((run) =>
       run.includes('config/scripts/macos-computer-helper-owner-loss-processes.test.mjs')

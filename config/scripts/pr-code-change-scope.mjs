@@ -88,9 +88,15 @@ const ORCAD_BROWSER_PREFIXES = [
 
 const CROSS_VERSION_WIRE_PREFIXES = [
   'tests/e2e/cross-version-wire/',
+  'src/shared/protocol-version',
+  'src/shared/terminal-stream-protocol',
   'src/shared/browser-client-host-protocol',
   'src/shared/browser-network-tunnel-protocol',
-  'src/shared/browser-client-host-placement'
+  'src/shared/browser-client-host-placement',
+  'src/main/runtime/rpc/dispatcher',
+  'src/main/runtime/rpc/methods/browser-tab-create-schema',
+  'src/main/runtime/rpc/methods/terminal',
+  'src/renderer/src/runtime/remote-runtime-terminal-multiplexer'
 ]
 
 const MANAGED_HOOK_PREFIXES = [

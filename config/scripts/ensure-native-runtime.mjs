@@ -67,7 +67,12 @@ function ensureNodeRuntime() {
     if (!initial.ok) {
       printCheckError(initial)
     }
-    runPnpm(['rebuild', 'node-pty'])
+    const failedModules = initial.failures.map((failure) => failure.moduleName)
+    const rebuildModules = [
+      'node-pty',
+      ...failedModules.filter((moduleName) => moduleName !== 'node-pty')
+    ]
+    runPnpm(['rebuild', ...rebuildModules])
     verifyNodeRuntimeAfterRebuild()
     return
   }

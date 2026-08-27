@@ -148,6 +148,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/install-node-dependencies
+        with:
+          native-runtime: electron
       - name: Owner-loss benchmark process cleanup
         run: >-
           pnpm vitest run

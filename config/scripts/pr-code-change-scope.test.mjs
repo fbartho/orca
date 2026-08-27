@@ -177,6 +177,27 @@ describe('per-job path classification', () => {
     })
   })
 
+  it('runs cross-version wire checks for every working-tree wire module', () => {
+    for (const file of [
+      'src/shared/protocol-version.ts',
+      'src/shared/terminal-stream-protocol.ts',
+      'src/main/runtime/rpc/dispatcher.ts',
+      'src/main/runtime/rpc/methods/browser-tab-create-schema.ts',
+      'src/main/runtime/rpc/methods/terminal.ts',
+      'src/renderer/src/runtime/remote-runtime-terminal-multiplexer.ts'
+    ]) {
+      expectClassification([file], {
+        'cross-version-wire': true,
+        package: true,
+        package_windows: true
+      })
+    }
+    expectClassification(
+      ['tests/e2e/cross-version-wire/cross-version-terminal-wire.unit.test.ts'],
+      { 'cross-version-wire': true }
+    )
+  })
+
   it('runs workflow-self-change and lockfile diffs as force-all', () => {
     const result = classifyPrJobs(['.github/workflows/pr.yml'])
     expect(result.should_run).toBe(true)
@@ -259,7 +280,7 @@ describe('PR Checks skip wiring', () => {
       if (job === 'code_paths' || job === 'root_directory_guard') {
         continue
       }
-      const envVar = `${job.toUpperCase()}_SHOULD_RUN`
+      const envVar = `${job.replaceAll('-', '_').toUpperCase()}_SHOULD_RUN`
       expect(verifyStep.env[envVar]).toBe(`\${{ needs.code_paths.outputs.${job} }}`)
       expect(verifyStep.run).toContain(`"$${envVar}"`)
     }

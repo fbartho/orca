@@ -106,7 +106,7 @@ describe('PR E2E gate contract', () => {
     expect(verifyStep.run).toContain('"$CODE_PATHS" != "success"')
     expect(verifyStep.run).toContain('"$ROOT_DIRECTORY_GUARD" != "success"')
     for (const job of prWorkflow.jobs.verify.needs) {
-      const envVar = job.toUpperCase()
+      const envVar = job.replaceAll('-', '_').toUpperCase()
       expect(verifyStep.env[envVar]).toBe(`\${{ needs.${job}.result }}`)
       if (job === 'code_paths' || job === 'root_directory_guard') {
         continue

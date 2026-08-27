@@ -19,6 +19,9 @@ outputs:
   node-version:
     description: Resolved Node.js version used for the install.
     value: ${{ steps.requested-node.outputs.node-version || steps.default-node.outputs.node-version }}
+  native-cache-scope:
+    description: Operating-system image scope used by the native module cache.
+    value: ${{ steps.native-cache-scope.outputs.scope }}
 
 runs:
   using: composite
@@ -60,7 +63,7 @@ runs:
 
     # pnpm's bundled gyp_main.py is not executable on fresh Linux runners.
     - name: Use external node-gyp
-      if: inputs.native-runtime != 'none'
+      if: runner.os == 'Linux' && inputs.native-runtime != 'none'
       shell: bash
       run: |
         npm install -g node-gyp@11.5.0
@@ -91,6 +94,21 @@ runs:
     # Node version, and the patch whose contents the build has to match.
     # Windows extra globs are empty on Linux. No restore-keys: a partial-match key is
     # an ABI-mismatched build, and ensure-native-runtime would recompile it anyway.
+    # Native addons built on a newer Linux image can require glibc symbols
+    # missing from an older runner/container. ImageOS distinguishes hosted
+    # Windows/macOS images; /etc/os-release also distinguishes Linux containers.
+    - name: Resolve native cache scope
+      id: native-cache-scope
+      if: inputs.native-runtime != 'none'
+      shell: bash
+      run: |
+        scope="${ImageOS:-$RUNNER_OS}"
+        if [ -r /etc/os-release ]; then
+          . /etc/os-release
+          scope="${ID:-linux}-${VERSION_ID:-unknown}"
+        fi
+        echo "scope=$scope" >> "$GITHUB_OUTPUT"
+
     - name: Restore compiled native modules
       if: inputs.native-runtime != 'none' && inputs.persist-native-cache != 'false'
       uses: actions/cache@v5
@@ -99,7 +117,7 @@ runs:
           node_modules/.pnpm/node-pty@*/node_modules/node-pty/build
           node_modules/.pnpm/windows-native-registry@*/node_modules/windows-native-registry/build
           node_modules/.pnpm/@vscode+windows-process-tree@*/node_modules/@vscode/windows-process-tree/build
-        key: native-modules-${{ runner.os }}-${{ runner.arch }}-${{ inputs.native-runtime }}-node${{ steps.default-node.outputs.node-version }}${{ steps.requested-node.outputs.node-version }}-${{ hashFiles('pnpm-lock.yaml', 'config/patches/node-pty@1.1.0.patch', 'config/patches/@vscode__windows-process-tree@0.8.0.patch') }}
+        key: native-modules-${{ runner.os }}-${{ steps.native-cache-scope.outputs.scope }}-${{ runner.arch }}-${{ inputs.native-runtime }}-node${{ steps.default-node.outputs.node-version }}${{ steps.requested-node.outputs.node-version }}-${{ hashFiles('pnpm-lock.yaml', 'config/patches/node-pty@1.1.0.patch', 'config/patches/@vscode__windows-process-tree@0.8.0.patch') }}
 
     - name: Restore compiled native modules without saving
       if: inputs.native-runtime != 'none' && inputs.persist-native-cache == 'false'
@@ -109,7 +127,7 @@ runs:
           node_modules/.pnpm/node-pty@*/node_modules/node-pty/build
           node_modules/.pnpm/windows-native-registry@*/node_modules/windows-native-registry/build
           node_modules/.pnpm/@vscode+windows-process-tree@*/node_modules/@vscode/windows-process-tree/build
-        key: native-modules-${{ runner.os }}-${{ runner.arch }}-${{ inputs.native-runtime }}-node${{ steps.default-node.outputs.node-version }}${{ steps.requested-node.outputs.node-version }}-${{ hashFiles('pnpm-lock.yaml', 'config/patches/node-pty@1.1.0.patch', 'config/patches/@vscode__windows-process-tree@0.8.0.patch') }}
+        key: native-modules-${{ runner.os }}-${{ steps.native-cache-scope.outputs.scope }}-${{ runner.arch }}-${{ inputs.native-runtime }}-node${{ steps.default-node.outputs.node-version }}${{ steps.requested-node.outputs.node-version }}-${{ hashFiles('pnpm-lock.yaml', 'config/patches/node-pty@1.1.0.patch', 'config/patches/@vscode__windows-process-tree@0.8.0.patch') }}
 
     - name: Prepare native runtime
       if: inputs.native-runtime != 'none'

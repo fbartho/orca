@@ -233,14 +233,10 @@ describe('PR workflow parallelism', () => {
         (step) => step.uses === './.github/actions/install-node-dependencies'
       )
 
-    for (const jobName of [
-      'static_analysis',
-      'typecheck',
-      'git_compatibility',
-      'xterm_patch_sync'
-    ]) {
+    for (const jobName of ['typecheck', 'git_compatibility', 'xterm_patch_sync']) {
       expect(installFor(jobName).with, jobName).toBeUndefined()
     }
+    expect(installFor('static_analysis').with['native-runtime']).toBe('node')
     expect(installFor('shell_contracts').with['native-runtime']).toBe('node')
     expect(installFor('test').with['native-runtime']).toBe('node')
     expect(installFor('package').with['native-runtime']).toBe('electron')
@@ -250,7 +246,7 @@ describe('PR workflow parallelism', () => {
     expect(dependencyAction.inputs['persist-native-cache'].default).toBe('true')
     expect(
       dependencyAction.runs.steps.find((step) => step.name === 'Use external node-gyp').if
-    ).toBe("inputs.native-runtime != 'none'")
+    ).toBe("runner.os == 'Linux' && inputs.native-runtime != 'none'")
     const dependencyInstall = dependencyAction.runs.steps.find(
       (step) => step.name === 'Install dependencies'
     )
@@ -315,6 +311,7 @@ describe('PR workflow parallelism', () => {
       expect(cacheStep.with.key).toContain('${{ runner.os }}')
       expect(cacheStep.with.key).toContain('${{ runner.arch }}')
       expect(cacheStep.with.key).toContain('steps.requested-node.outputs.node-version')
+      expect(cacheStep.with.key).toContain('steps.native-cache-scope.outputs.scope')
       expect(cacheStep.with.key).toContain('config/patches/node-pty@1.1.0.patch')
       expect(cacheStep.with.key).toContain(
         'config/patches/@vscode__windows-process-tree@0.8.0.patch'
@@ -324,6 +321,12 @@ describe('PR workflow parallelism', () => {
       expect(cacheStep.with.path).toContain('@vscode+windows-process-tree@')
       expect(cacheStep.with['restore-keys']).toBeUndefined()
     }
+    const cacheScope = steps.find((step) => step.name === 'Resolve native cache scope')
+    expect(cacheScope.if).toBe("inputs.native-runtime != 'none'")
+    expect(cacheScope.run).toContain('/etc/os-release')
+    expect(dependencyAction.outputs['native-cache-scope'].value).toBe(
+      '${{ steps.native-cache-scope.outputs.scope }}'
+    )
   })
 
   it('reuses TypeScript incremental state across typecheck runs', () => {
@@ -367,6 +370,7 @@ describe('PR workflow parallelism', () => {
       'shell_contracts',
       'test',
       'orcad_browser',
+      'cross-version-wire',
       'managed_hook_node18',
       'package',
       'package_windows'
@@ -380,5 +384,7 @@ describe('PR workflow parallelism', () => {
     // ORCA_BROWSER_EXECUTABLE, so it only guards anything if verify actually reads it.
     expect(verifyStep.env.ORCAD_BROWSER).toBe('${{ needs.orcad_browser.result }}')
     expect(verifyStep.run).toContain('"$ORCAD_BROWSER"')
+    expect(verifyStep.env.CROSS_VERSION_WIRE).toBe('${{ needs.cross-version-wire.result }}')
+    expect(verifyStep.run).toContain('"$CROSS_VERSION_WIRE"')
   })
 })
