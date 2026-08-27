@@ -177,6 +177,103 @@ describe('iPadOS Hangul typed as bare keydowns', () => {
     expect(rig.emitted).toEqual(['\x7f'])
   })
 
+  it('keeps the syllable painted between the delete and insert that replace it', async () => {
+    // Why: the IME empties the field for one event in the middle of growing a
+    // syllable, and reading it there would blank the overlay every keystroke.
+    pretendIosWeb()
+    const rig = openIosTerminal()
+    await typeJamo(rig, '\u314E', '\u314E', { replaces: false })
+
+    dispatchKey(rig, 'keydown', { key: '\u3153', keyCode: '\u3153'.charCodeAt(0) })
+    rig.textarea.value = ''
+    dispatchInput(rig, 'deleteContentBackward', null)
+    expect(rig.compositionView.textContent).toBe('\u314E')
+
+    rig.textarea.value = '\uD5E4'
+    dispatchInput(rig, 'insertText', '\uD5E4')
+    await nextEventLoop()
+    expect(rig.compositionView.textContent).toBe('\uD5E4')
+  })
+
+  it('holds the syllable when Backspace decomposes it as delete-then-insert', async () => {
+    // Why: the IME rewrites a growing syllable as deleteContentBackward then a
+    // replacing insertText, and there is no reason a shrinking one differs. A
+    // hold that closed on the emptied half sent the next jamo raw.
+    pretendIosWeb()
+    const rig = openIosTerminal()
+    await typeJamo(rig, '\u314E', '\uD558', { replaces: false })
+    await typeJamo(rig, '\u3153', '\uD5E4', { replaces: true })
+    await typeJamo(rig, '\u3134', '\uD5E8', { replaces: true })
+
+    dispatchKey(rig, 'keydown', { key: 'Backspace', code: 'Backspace', keyCode: 8 })
+    rig.textarea.value = ''
+    dispatchInput(rig, 'deleteContentBackward', null)
+    rig.textarea.value = '\uD5E4'
+    dispatchInput(rig, 'insertText', '\uD5E4')
+    await nextEventLoop()
+
+    expect(rig.emitted).toEqual([])
+    expect(rig.preedit.heldText()).toBe('\uD5E4')
+
+    await typeJamo(rig, '\u3139', '\uD5EC', { replaces: true })
+    dispatchKey(rig, 'keydown', { key: ' ', code: 'Space', keyCode: 32 })
+    await nextEventLoop()
+    expect(rig.emitted.join('')).toContain('\uD5EC')
+  })
+
+  it('does not resurrect the opening jamo after Backspace emptied the field', async () => {
+    // Why: the openKey is owed to the PTY only while the IME has written nothing.
+    pretendIosWeb()
+    const rig = openIosTerminal()
+    await typeJamo(rig, '\u314E', '\u314E', { replaces: false })
+
+    dispatchKey(rig, 'keydown', { key: 'Backspace', code: 'Backspace', keyCode: 8 })
+    rig.textarea.value = ''
+    dispatchInput(rig, 'deleteContentBackward', null)
+    await nextEventLoop()
+
+    dispatchKey(rig, 'keydown', { key: ' ', code: 'Space', keyCode: 32 })
+    await nextEventLoop()
+    expect(rig.emitted.join('')).not.toContain('\u314E')
+  })
+
+  it('composes one syllable from a field the IME leaves decomposed', async () => {
+    // Why: NFD grows the field by appending jamo, and an append is what the diff
+    // reads as the previous syllable settling — each jamo would go out alone.
+    pretendIosWeb()
+    const rig = openIosTerminal()
+    const steps: [string, string][] = [
+      ['\u314E', '\u1112'],
+      ['\u3153', '\u1112\u1165'],
+      ['\u3134', '\u1112\u1165\u11AB']
+    ]
+    for (const [key, field] of steps) {
+      dispatchKey(rig, 'keydown', { key, keyCode: key.charCodeAt(0) })
+      rig.textarea.value = field
+      dispatchInput(rig, 'insertText', field.slice(-1))
+      await nextEventLoop()
+      expect(rig.emitted).toEqual([])
+    }
+
+    dispatchKey(rig, 'keydown', { key: ' ', code: 'Space', keyCode: 32 })
+    await nextEventLoop()
+    expect(rig.emitted[0]).toBe('\uD5CC')
+  })
+
+  it('clears the overlay when the pane disposes the controller', async () => {
+    // Why: the pane disposes the controller before xterm tears its DOM down, so
+    // a held syllable would otherwise stay painted over a dead pane.
+    pretendIosWeb()
+    const rig = openIosTerminal()
+    await typeJamo(rig, '\u314E', '\u314E', { replaces: false })
+    expect(rig.compositionView.classList.contains('active')).toBe(true)
+
+    rig.preedit.dispose()
+
+    expect(rig.compositionView.classList.contains('active')).toBe(false)
+    expect(rig.compositionView.textContent).toBe('')
+  })
+
   it('discards the open syllable on Escape, as a composition does', async () => {
     pretendIosWeb()
     const rig = openIosTerminal()

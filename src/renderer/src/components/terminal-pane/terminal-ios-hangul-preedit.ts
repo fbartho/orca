@@ -25,6 +25,8 @@ type OpenPreedit = {
   heldText: string
   /** The jamo that opened the hold, owed to the PTY if the IME never writes. */
   openKey: string
+  /** Set once the IME has written to the field, which retires `openKey`. */
+  imeWrote: boolean
   /** What the last keydown asked the IME to do to the syllable. */
   editKind: 'compose' | 'erase'
 }
@@ -79,6 +81,17 @@ type FieldEdit = {
   start: number
   /** What it wrote from `start` on; empty when the rewrite wrote nothing. */
   text: string
+}
+
+/**
+ * Why NFC: a decomposed field grows `ᄒ` -> `하` -> `한` by appending, and an
+ * append is exactly what the diff reads as the previous syllable settling — so
+ * an NFD source would put one bare jamo on the wire per keystroke. Composed,
+ * the same three keystrokes rewrite one character in place, as the device trace
+ * does. Idempotent on the NFC text iPadOS was recorded producing.
+ */
+function normalizeFieldText(value: string): string {
+  return value.normalize('NFC')
 }
 
 /**
@@ -138,7 +151,8 @@ export function installTerminalIosHangulPreedit(
       return
     }
     // A hold the IME never wrote to still owes the keystroke it swallowed.
-    const text = open.heldText || (isHangulJamoKeyText(open.openKey) ? open.openKey : '')
+    const text =
+      open.heldText || (!open.imeWrote && isHangulJamoKeyText(open.openKey) ? open.openKey : '')
     close()
     if (text) {
       options.sendInput(text)
@@ -170,7 +184,7 @@ export function installTerminalIosHangulPreedit(
     if (!open) {
       return
     }
-    const value = textarea.value
+    const value = normalizeFieldText(textarea.value)
     if (!value.startsWith(open.baseValue)) {
       // The field was rewritten out from under the hold; commit rather than
       // measure against text that is gone.
@@ -179,9 +193,13 @@ export function installTerminalIosHangulPreedit(
     }
     const tail = value.slice(open.baseValue.length)
     if (tail.length === 0) {
-      // Backspace erased the syllable's last jamo. None of it was sent, so
-      // nothing needs undoing — and the next Backspace is the PTY's.
-      close()
+      // Backspace can decompose as delete-then-insert, so an emptied field is
+      // not proof the syllable is gone — only that this half of the rewrite
+      // wrote nothing. The hold stays open, empty; the Backspace that finds it
+      // empty is the one the PTY gets. Nothing was sent, so nothing needs
+      // undoing either way.
+      open.heldText = ''
+      render('')
       return
     }
     const edit = diffFieldEdit(open.heldText, tail)
@@ -215,6 +233,11 @@ export function installTerminalIosHangulPreedit(
         return
       }
       if (event.key === 'Backspace' && isUnmodified(event)) {
+        if (!preedit.heldText) {
+          // Nothing left to decompose: this erase is the PTY's, and xterm sends it.
+          close()
+          return
+        }
         // Backspace decomposes the held syllable in the field rather than
         // erasing a written cell, so it must not reach the PTY as DEL.
         preedit.editKind = 'erase'
@@ -235,9 +258,10 @@ export function installTerminalIosHangulPreedit(
       !options.isScreenReaderMode()
     ) {
       preedit = {
-        baseValue: textarea.value,
+        baseValue: normalizeFieldText(textarea.value),
         heldText: '',
         openKey: event.key,
+        imeWrote: false,
         editKind: 'compose'
       }
     }
@@ -261,6 +285,7 @@ export function installTerminalIosHangulPreedit(
     // Why: the field keeps the syllable so the IME can rewrite it, and xterm
     // must not read that as fresh input.
     event.stopImmediatePropagation()
+    preedit.imeWrote = true
     if (preedit.editKind === 'compose' && isDeletion(event)) {
       // Half of the delete-then-insert the IME uses to replace a growing
       // syllable. Reading the field between the two would see it emptied.
