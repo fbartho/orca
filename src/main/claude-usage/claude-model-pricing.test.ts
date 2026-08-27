@@ -45,3 +45,33 @@ describe('estimateCostUsd cache-write TTL rates', () => {
     expect(estimateCostUsd('gpt-5', 0, 0, 0, 1_000_000, 1_000_000)).toBeNull()
   })
 })
+
+// Published Claude Sonnet 5 rates (platform.claude.com/docs/en/about-claude/pricing):
+// $2 base input, $10 output, $0.20 cache hit, $2.50 5m write, $4 1h write per MTok.
+// The $2/$10 launch price, announced as introductory through 2026-08-31, is now the
+// standard price — the scheduled 2026-09-01 rise to $3/$15 was cancelled — so the rate
+// is date-independent.
+describe('estimateCostUsd Claude Sonnet 5 rates', () => {
+  it('bills base input at $2/MTok', () => {
+    expect(estimateCostUsd('claude-sonnet-5', 1_000_000, 0, 0, 0, 0)).toBeCloseTo(2)
+  })
+
+  it('bills output at $10/MTok', () => {
+    expect(estimateCostUsd('claude-sonnet-5', 0, 1_000_000, 0, 0, 0)).toBeCloseTo(10)
+  })
+
+  it('bills cache hits at $0.20/MTok', () => {
+    expect(estimateCostUsd('claude-sonnet-5', 0, 0, 1_000_000, 0, 0)).toBeCloseTo(0.2)
+  })
+
+  it('bills 5-minute cache writes at $2.50/MTok and 1-hour writes at $4/MTok', () => {
+    expect(estimateCostUsd('claude-sonnet-5', 0, 0, 0, 1_000_000, 0)).toBeCloseTo(2.5)
+    expect(estimateCostUsd('claude-sonnet-5', 0, 0, 0, 1_000_000, 1_000_000)).toBeCloseTo(4)
+  })
+
+  it('keeps the full 1M window at flat rates with no long-context tier', () => {
+    expect(estimateCostUsd('claude-sonnet-5', 1_000_000, 0, 0, 0, 0)).toBeCloseTo(
+      estimateCostUsd('claude-sonnet-5', 500_000, 0, 0, 0, 0)! * 2
+    )
+  })
+})

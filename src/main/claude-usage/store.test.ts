@@ -401,7 +401,7 @@ describe('ClaudeUsageStore', () => {
     ).toBeCloseTo(73.5)
     expect(
       breakdown.find((row) => row.key === 'claude-sonnet-5-thinking')?.estimatedCostUsd
-    ).toBeCloseTo(22.05)
+    ).toBeCloseTo(14.7)
   })
 
   it('prices Sonnet 5 long-context usage at flat rates', async () => {
@@ -428,7 +428,7 @@ describe('ClaudeUsageStore', () => {
     const summary = await store.getSummary('orca', '30d')
 
     // Why: Sonnet 4.6 and earlier bill above 200k at a premium; Sonnet 5 does not.
-    expect(summary.estimatedCostUsd).toBeCloseTo(6.615)
+    expect(summary.estimatedCostUsd).toBeCloseTo(4.41)
   })
 
   it('does not collapse Opus 4.5 or Sonnet 4.5 usage into Claude 5 pricing', async () => {
