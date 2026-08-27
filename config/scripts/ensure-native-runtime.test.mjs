@@ -42,8 +42,8 @@ describe('ensure-native-runtime', () => {
 
       expect(result.status, result.stderr).toBe(0)
       const log = readFileSync(logPath, 'utf8')
-      expect(log).toContain('pnpm rebuild node-pty\n')
-      expect(log).toContain('npm_config_build_from_source=true')
+      expect(log).toContain('pnpm exec node-gyp rebuild\n')
+      expect(log).toContain(join('node_modules', 'node-pty'))
       expect(log.split('\n').filter((line) => line.startsWith('node-pty child '))).toEqual([
         expect.stringMatching(/^node-pty child (?:conpty|pty) marker=false$/),
         expect.stringMatching(/^node-pty child (?:conpty|pty) marker=true$/)
@@ -79,11 +79,9 @@ describe('ensure-native-runtime', () => {
 
         expect(result.status, result.stderr).toBe(0)
         const log = readFileSync(logPath, 'utf8')
-        expect(log).toContain('pnpm rebuild node-pty\n')
-        expect(log).toContain('pnpm exec node-gyp rebuild\n')
-        expect(log).toContain(
-          `cwd=${join(projectDir, 'node_modules', 'windows-native-registry')}\n`
-        )
+        expect(log.match(/pnpm exec node-gyp rebuild\n/g)).toHaveLength(2)
+        expect(log).toContain(join('node_modules', 'node-pty'))
+        expect(log).toContain(join('node_modules', 'windows-native-registry'))
       } finally {
         rmSync(projectDir, { recursive: true, force: true })
       }
@@ -118,7 +116,7 @@ describe('ensure-native-runtime', () => {
         expect(result.stderr).toContain(
           'Patched node-pty build artifacts are missing; rebuilding native deps.'
         )
-        expect(readFileSync(logPath, 'utf8')).toContain('pnpm rebuild node-pty\n')
+        expect(readFileSync(logPath, 'utf8')).toContain('pnpm exec node-gyp rebuild\n')
       } finally {
         rmSync(projectDir, { recursive: true, force: true })
       }
@@ -152,7 +150,7 @@ describe('ensure-native-runtime', () => {
 
         expect(result.status, result.stderr).toBe(0)
         expect(result.stderr).toContain("expected build/Release so Orca's node-pty patch is active")
-        expect(readFileSync(logPath, 'utf8')).toContain('pnpm rebuild node-pty\n')
+        expect(readFileSync(logPath, 'utf8')).toContain('pnpm exec node-gyp rebuild\n')
       } finally {
         rmSync(projectDir, { recursive: true, force: true })
       }
@@ -186,7 +184,7 @@ describe('ensure-native-runtime', () => {
 
         expect(result.status, result.stderr).toBe(0)
         expect(result.stderr).not.toContain('Patched node-pty build artifacts are missing')
-        expect(readFileSync(logPath, 'utf8')).not.toContain('pnpm rebuild node-pty')
+        expect(readFileSync(logPath, 'utf8')).not.toContain('pnpm exec node-gyp rebuild')
       } finally {
         rmSync(projectDir, { recursive: true, force: true })
       }
@@ -219,6 +217,12 @@ function envWithPrependedPath(binDir, extraEnv) {
 function writeFakeNativeModules(projectDir, { windowsRegistryRequiresMarker = false } = {}) {
   const nodePtyDir = join(projectDir, 'node_modules', 'node-pty')
   mkdirSync(join(nodePtyDir, 'lib'), { recursive: true })
+  writeFileSync(
+    join(nodePtyDir, 'package.json'),
+    '{"name":"node-pty","version":"1.1.0","main":"index.js"}\n'
+  )
+  mkdirSync(join(nodePtyDir, 'scripts'), { recursive: true })
+  writeFileSync(join(nodePtyDir, 'scripts', 'post-install.js'), '')
 
   writeFileSync(join(nodePtyDir, 'index.js'), 'module.exports = {}\n')
   writeFileSync(
@@ -244,6 +248,12 @@ exports.loadNativeModule = function loadNativeModule(nativeName) {
 function writeLoadableNativeModules(projectDir, { nativeDir = null } = {}) {
   const nodePtyDir = join(projectDir, 'node_modules', 'node-pty')
   mkdirSync(join(nodePtyDir, 'lib'), { recursive: true })
+  writeFileSync(
+    join(nodePtyDir, 'package.json'),
+    '{"name":"node-pty","version":"1.1.0","main":"index.js"}\n'
+  )
+  mkdirSync(join(nodePtyDir, 'scripts'), { recursive: true })
+  writeFileSync(join(nodePtyDir, 'scripts', 'post-install.js'), '')
 
   writeFileSync(join(nodePtyDir, 'index.js'), 'module.exports = {}\n')
   writeFileSync(

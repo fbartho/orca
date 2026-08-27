@@ -366,32 +366,23 @@ function getWindowsBuildNumber() {
 }
 
 function rebuildNodeRuntimeModules(moduleNames) {
-  if (moduleNames.includes('node-pty')) {
-    runPnpm(['rebuild', 'node-pty'])
-  }
   for (const moduleName of moduleNames) {
-    if (moduleName === 'node-pty') {
-      continue
-    }
     const moduleDir = dirname(require.resolve(`${moduleName}/package.json`))
     console.warn(`[native-runtime] Rebuilding ${moduleName} with node-gyp.`)
     runPnpm(['exec', 'node-gyp', 'rebuild'], { cwd: moduleDir })
+    if (moduleName === 'node-pty' && process.platform === 'win32') {
+      runNodeScript([resolve(moduleDir, 'scripts', 'post-install.js')])
+    }
   }
 }
 
 function runPnpm(args, { cwd = projectDir } = {}) {
   const command = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'
-  const env = { ...process.env }
-  // Why: node-pty prefers its upstream prebuild, which does not contain Orca's
-  // patch. build_from_source removes the prebuild so the rebuild compiles it.
-  if (args[0] === 'rebuild' && args.includes('node-pty')) {
-    env.npm_config_build_from_source = 'true'
-  }
   const result = spawnSync(command, args, {
     cwd,
     stdio: 'inherit',
     shell: process.platform === 'win32',
-    env
+    env: process.env
   })
 
   if (result.error || result.status !== 0) {
