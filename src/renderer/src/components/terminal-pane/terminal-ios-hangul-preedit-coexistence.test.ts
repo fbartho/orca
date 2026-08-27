@@ -127,6 +127,34 @@ describe('the iPadOS Hangul path alongside everything else', () => {
     expect(rig.emitted.join('')).toContain('한글')
   })
 
+  it('commits a Japanese kana-to-kanji session once, like pinyin', async () => {
+    pretendIosWeb()
+    const rig = openIosTerminal()
+    await typePinyin(rig, 'ka', '蚊')
+
+    expect(rig.emitted).toEqual(['蚊'])
+  })
+
+  it('leaves a Hanja lookup to the session that owns its preedit', async () => {
+    // Why: ibus-hangul indexes its Hanja table by digit, but only over a live
+    // composition — which xterm's CompositionHelper already commits.
+    pretendIosWeb()
+    const rig = openIosTerminal()
+    await typePinyin(rig, 'han', '韓')
+
+    expect(rig.emitted).toEqual(['韓'])
+  })
+
+  it('sends a digit after a held syllable as the literal text that ends it', async () => {
+    pretendIosWeb()
+    const rig = openIosTerminal()
+    await typeJamo(rig, 'ㅎ', 'ㅎ', { replaces: false })
+    await typeJamo(rig, 'ㅏ', '하', { replaces: true })
+    await typePrintable(rig, { key: '1', keyCode: 49, written: '1', replaces: false })
+
+    expect(rig.emitted).toEqual(['하', '1'])
+  })
+
   describe('desktop platforms', () => {
     it('is inert on a Mac reporting no touch points', async () => {
       pretendIosWeb(0)
@@ -197,10 +225,10 @@ describe('the iPadOS Hangul path alongside everything else', () => {
     // its keypress and its `input` alike and arrive as nothing.
     pretendIosWeb()
     const rig = openIosTerminal()
-    for (const key of ['п', 'р', 'あ', 'é']) {
+    for (const key of ['п', 'р', 'α', 'ω', 'あ', 'カ', 'é', 'ü', '€']) {
       await typePrintable(rig, { key, keyCode: 71, written: key, replaces: false })
     }
 
-    expect(rig.emitted).toEqual(['п', 'р', 'あ', 'é'])
+    expect(rig.emitted).toEqual(['п', 'р', 'α', 'ω', 'あ', 'カ', 'é', 'ü', '€'])
   })
 })
