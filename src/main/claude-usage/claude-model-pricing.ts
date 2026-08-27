@@ -211,6 +211,13 @@ export function estimateCostUsd(
   }
   const pricing = MODEL_PRICING[normalized]
   const write1hTokens = Math.min(Math.max(cacheWrite1hTokens, 0), cacheWriteTokens)
+  // Why: both TTL buckets share one long-context allowance. Giving each its own
+  // would make a split bucket cheaper than the same tokens billed entirely at 5m.
+  const write1hShare = cacheWriteTokens > 0 ? write1hTokens / cacheWriteTokens : 0
+  const write5mThreshold =
+    pricing.thresholdTokens === undefined ? undefined : pricing.thresholdTokens * (1 - write1hShare)
+  const write1hThreshold =
+    pricing.thresholdTokens === undefined ? undefined : pricing.thresholdTokens * write1hShare
   return (
     (calculateTieredCost(
       inputTokens,
@@ -234,13 +241,13 @@ export function estimateCostUsd(
         cacheWriteTokens - write1hTokens,
         pricing.cacheWrite,
         pricing.cacheWriteAboveThreshold,
-        pricing.thresholdTokens
+        write5mThreshold
       ) +
       calculateTieredCost(
         write1hTokens,
         pricing.cacheWrite1h,
         pricing.cacheWrite1hAboveThreshold,
-        pricing.thresholdTokens
+        write1hThreshold
       )) /
     1_000_000
   )
