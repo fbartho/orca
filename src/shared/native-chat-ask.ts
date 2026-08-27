@@ -61,10 +61,12 @@ function parseOptions(raw: unknown): AskOption[] {
         typeof option === 'object' &&
         typeof (option as { label?: unknown }).label === 'string'
       ) {
-        const value = option as { label: string; description?: unknown }
+        const value = option as { label: string; description?: unknown; preview?: unknown }
         return {
           label: value.label,
-          description: typeof value.description === 'string' ? value.description : undefined
+          description: typeof value.description === 'string' ? value.description : undefined,
+          hasPreview:
+            typeof value.preview === 'string' && value.preview.length > 0 ? true : undefined
         }
       }
       return null
@@ -188,11 +190,20 @@ const ASK_PREVIOUS_ROW = '\x1b[A'
 const ASK_NEXT_ROW = '\x1b[B'
 const ASK_NOTES = '\t'
 
+/** True once any option in the question carries a preview snippet — the
+ *  selector then switches to a list+preview layout where a digit only moves
+ *  the highlight, and a separate Enter commits it. */
+function questionHasPreview(q: AskQuestion): boolean {
+  return q.options.some((o) => o.hasPreview === true)
+}
+
 /** Build the ordered keystroke groups that answer a Claude Code AskUserQuestion.
  *  Each group is written a step apart so the selector applies it before the next.
  *
  *  - single-select pick  → the option number (selects AND commits; in a
- *    multi-question prompt it auto-advances to the next question)
+ *    multi-question prompt it auto-advances to the next question) — except when
+ *    the question has a preview-style layout, where the digit only highlights
+ *    and a following Enter commits it
  *  - free-text answer    → the "Type something" row number, the text, then Enter
  *  - multi-select        → each option number TOGGLES its checkbox, then a step
  *    to the Submit tab
@@ -234,6 +245,9 @@ export function buildAskAnswerKeys(
       )
     } else if ((sel?.indices.length ?? 0) > 0) {
       groups.push({ raw: String(sel!.indices[0]! + 1) })
+      if (questionHasPreview(q)) {
+        groups.push({ raw: ASK_ENTER })
+      }
     } else if (multiQuestion) {
       // Unanswered question in a multi-question prompt: step past it.
       groups.push({ raw: ASK_NEXT_TAB })
