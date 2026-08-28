@@ -198,8 +198,11 @@ export async function sendRuntimePtyInputVerified(
     const accepted = await window.api.pty.writeAccepted(ptyId, data)
     if (!accepted) {
       window.api.pty.write(ptyId, data)
-      // Why: SSH/local fallback writes are fire-and-forget. Callers use this
-      // boolean to continue UX flow, while hook telemetry confirms real turns.
+      // Why: `writeAccepted` answers false for whole healthy transports — an
+      // SSH-owned or mobile-driven pty cannot acknowledge — so a false here is
+      // "unacknowledged", not "failed", and callers gate live UX on it.
+      // This boolean therefore never means the agent acted on the bytes; a
+      // surface needing that (question answers) must confirm it separately.
       recordRuntimeTerminalInputForPtyId(ptyId)
       return true
     }
