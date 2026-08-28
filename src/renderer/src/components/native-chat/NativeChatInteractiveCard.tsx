@@ -137,8 +137,14 @@ export function NativeChatInteractiveCard({
     if (!present) {
       setDismissedKey(null)
       clearDismissTimer()
+      // An answer is paced over seconds, so the ask can be retired mid-send
+      // (#16865). Drop the remaining keystroke groups: with the selector gone
+      // they land in the composer as literal text, and a trailing Enter submits
+      // it. Also retires the deadline — a resolved ask owes no confirmation.
+      cancelPending()
+      clearConfirmationWait()
     }
-  }, [present, clearDismissTimer])
+  }, [present, clearDismissTimer, cancelPending, clearConfirmationWait])
 
   // Tell the view when a question card is up so it can hide the composer (this
   // card supplies its own input). Reset on unmount so the composer comes back.

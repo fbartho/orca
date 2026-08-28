@@ -111,6 +111,17 @@ function askResultMessage(): NativeChatMessage {
   } as unknown as NativeChatMessage
 }
 
+/** The transcript tool-call for the live `INITIAL_PROMPT` question — same
+ *  canonical content, as a real session emits for one AskUserQuestion. */
+function initialPromptCallMessage(): NativeChatMessage {
+  return {
+    id: 'call-initial',
+    role: 'assistant',
+    createdAt: 1,
+    blocks: [{ type: 'tool-call', name: 'AskUserQuestion', input: JSON.parse(INITIAL_PROMPT) }]
+  } as unknown as NativeChatMessage
+}
+
 function chooseSpacesAndSubmit(): void {
   fireEvent.click(screen.getByRole('button', { name: /Spaces/ }))
   fireEvent.click(screen.getByRole('button', { name: 'Submit' }))
@@ -363,6 +374,44 @@ describe('NativeChatInteractiveCard unconfirmed answers', () => {
 
     expect(screen.queryByText('Tabs or spaces?')).not.toBeInTheDocument()
     expect(mocks.confirmAnswered).not.toHaveBeenCalled()
+  })
+
+  // A question killed inside the TUI (selector ESC, or the card's X sending a
+  // real ESC byte) emits no hook, so live status keeps asserting it. Before the
+  // liveness check the deadline restored the card over a dead question, and
+  // answering it typed option digits into the bare composer (#16865).
+  it('does not resurrect a question the transcript shows already resolved', () => {
+    let settleDelivery: ((delivered: boolean) => void) | undefined
+    mocks.sendAnswer.mockImplementation((_prompt, _selections, onDeliverySettled) => {
+      settleDelivery = onDeliverySettled
+      return sendResult(500, true)
+    })
+    const messages = [initialPromptCallMessage()]
+    const rendered = render(cardElement(true, messages))
+    chooseSpacesAndSubmit()
+    act(() => settleDelivery?.(true))
+
+    // Live status still holds the dead question; only the transcript knows.
+    rendered.rerender(cardElement(true, [...messages, askResultMessage()]))
+    act(() => {
+      vi.advanceTimersByTime(nativeChatAnswerConfirmDeadlineMs(500))
+    })
+
+    expect(screen.queryByText('Tabs or spaces?')).not.toBeInTheDocument()
+  })
+
+  it('drops the remaining keystrokes when the ask dies mid-send', () => {
+    mocks.sendAnswer.mockReturnValue(sendResult(6_000, true))
+    const messages = [initialPromptCallMessage()]
+    const rendered = render(cardElement(true, messages))
+    chooseSpacesAndSubmit()
+    expect(mocks.cancelPending).not.toHaveBeenCalled()
+
+    // The selector dies between paced keystroke groups.
+    rendered.rerender(cardElement(true, [...messages, askResultMessage()]))
+
+    expect(mocks.cancelPending).toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: 'Sending…' })).not.toBeInTheDocument()
   })
 
   // The plain-selector flow commits on a digit and its hook event follows
