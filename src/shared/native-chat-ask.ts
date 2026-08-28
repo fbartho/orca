@@ -252,8 +252,7 @@ const ASK_NEXT_ROW = '\x1b[B'
 const ASK_NOTES = '\t'
 // The preview layout has no "Type something" row (upstream
 // anthropics/claude-code#27348, closed "not planned"). Free text goes through a
-// per-option note instead: `n` opens a note on the highlighted row, and the
-// typed text submits as a note-only answer that carries no option selection.
+// per-option note instead: `n` opens the notes field on the highlighted row.
 const ASK_PREVIEW_NOTE = 'n'
 
 /** True once any option in the question carries a preview snippet — the
@@ -266,24 +265,22 @@ function questionHasPreview(q: AskQuestion): boolean {
 /** Answer a preview-layout question, whose row set and commit semantics differ
  *  from the plain selector: no "Type something" row, and a digit only highlights.
  *
- *  Free text always delivers through a note, which the tool result carries as an
- *  annotation with no option counted as selected — so an answer that has BOTH a
- *  pick and free text folds the label into the note text rather than dropping
- *  either. Combining a committed pick with a note in one sequence is unmeasured. */
+ *  Notes attach to a selected option — the layout offers no selection-less note —
+ *  so an answer without a pick delivers nothing rather than fabricating a
+ *  selection or sending a sequence the selector does not accept. */
 function buildPreviewAnswerKeys(
-  q: AskQuestion,
   sel: AskAnswerSelection | undefined,
   other: string
 ): AskAnswerKeyGroup[] {
+  const picked = sel?.indices[0]
+  if (picked === undefined) {
+    return []
+  }
+  const selectRow: AskAnswerKeyGroup = { raw: String(picked + 1) }
   if (other) {
-    const labels = answerLabels(q, sel).filter((label) => label !== other)
-    const note = labels.length > 0 ? `${labels.join(', ')} — ${other}` : other
-    return [{ raw: ASK_PREVIEW_NOTE }, { text: note }, { raw: ASK_ENTER }]
+    return [selectRow, { raw: ASK_PREVIEW_NOTE }, { text: other }, { raw: ASK_ENTER }]
   }
-  if ((sel?.indices.length ?? 0) > 0) {
-    return [{ raw: String(sel!.indices[0]! + 1) }, { raw: ASK_ENTER }]
-  }
-  return []
+  return [selectRow, { raw: ASK_ENTER }]
 }
 
 /** Build the ordered keystroke groups that answer a Claude Code AskUserQuestion.
@@ -325,7 +322,7 @@ export function buildAskAnswerKeys(
       // when this is the last question).
       groups.push({ raw: ASK_NEXT_TAB })
     } else if (questionHasPreview(q)) {
-      const previewGroups = buildPreviewAnswerKeys(q, sel, other)
+      const previewGroups = buildPreviewAnswerKeys(sel, other)
       if (previewGroups.length > 0) {
         groups.push(...previewGroups)
       } else if (multiQuestion) {
