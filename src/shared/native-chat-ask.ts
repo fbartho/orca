@@ -136,13 +136,63 @@ export function extractPendingAsk(messages: readonly NativeChatMessage[]): AskPr
   return pending
 }
 
-/** Prefers live status and consults transcript history only after its read settles. */
+/** Does the transcript positively show THIS ask already resolved?
+ *
+ *  Answers only from evidence: a tool-call matching `ask` whose FIFO slot then
+ *  received its tool-result. Absence of the call, an unsettled read, and a call
+ *  orphaned by a user turn or interrupt all answer false — an orphan's result
+ *  never arrives, so it can never witness resolution (#11761). Callers use this
+ *  to retire an ask that live status still asserts; a false negative leaves a
+ *  stale card up, while a false positive would hide a live question.
+ *
+ *  Claude Code writes a tool-result row for an AskUserQuestion cancelled in the
+ *  TUI (`is_error`), so a selector the user escaped reads as resolved here. */
+export function isAskResolvedInTranscript(
+  ask: AskPrompt,
+  messages: readonly NativeChatMessage[]
+): boolean {
+  // Same identity the cards dismiss under: canonical content, not object identity.
+  const askKey = nativeChatAskDismissKey(ask)
+  // Mirrors extractPendingAsk's FIFO walk: `outstanding` holds each unresolved
+  // call's key (or null for a non-question call), oldest first.
+  let outstanding: (string | null)[] = []
+  let resolved = false
+  for (const message of messages) {
+    if (message.role === 'user' || isInterruptedStatusMessage(message)) {
+      // The turn owning these calls ended; their results never arrive. Any match
+      // seen so far belonged to a turn that is over, so re-arm from scratch.
+      outstanding = []
+      resolved = false
+    }
+    for (const block of message.blocks) {
+      if (block.type === 'tool-call') {
+        outstanding.push(nativeChatAskDismissKey(parseToolInput(block.name, block.input)))
+      } else if (block.type === 'tool-result' && outstanding.length > 0) {
+        if (outstanding.shift() === askKey) {
+          resolved = true
+        }
+      }
+    }
+  }
+  return resolved
+}
+
+/** Prefers live status, except where the settled transcript positively shows the
+ *  live ask already resolved — a question killed inside the TUI emits no hook, so
+ *  live status would otherwise assert it forever (#16865). Falls through to the
+ *  transcript's own pending ask so a genuinely newer question still renders. */
 export function resolveNativeChatAsk(args: {
   liveAsk: AskPrompt | null
   messages: readonly NativeChatMessage[]
   transcriptSettled: boolean
 }): AskPrompt | null {
-  return args.liveAsk ?? (args.transcriptSettled ? extractPendingAsk(args.messages) : null)
+  if (args.liveAsk) {
+    if (!args.transcriptSettled || !isAskResolvedInTranscript(args.liveAsk, args.messages)) {
+      return args.liveAsk
+    }
+    return extractPendingAsk(args.messages)
+  }
+  return args.transcriptSettled ? extractPendingAsk(args.messages) : null
 }
 
 /** One question's chosen answer, normalized for delivery: the selected option
