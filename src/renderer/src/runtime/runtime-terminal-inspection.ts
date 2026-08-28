@@ -180,6 +180,10 @@ function sendRuntimePtyInputWithinLimit(
   return true
 }
 
+/** Write PTY input and wait for transport-level acceptance where the transport
+ *  can report it. A `true` return does not prove the agent acted on the bytes —
+ *  see the SSH/mobile fallback note below — so a caller needing that must
+ *  confirm it through a separate signal (e.g. transcript or hook status). */
 export async function sendRuntimePtyInputVerified(
   settings: Pick<GlobalSettings, 'activeRuntimeEnvironmentId'> | null | undefined,
   ptyId: string,
