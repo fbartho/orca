@@ -146,7 +146,9 @@ export function extractPendingAsk(messages: readonly NativeChatMessage[]): AskPr
  *  stale card up, while a false positive would hide a live question.
  *
  *  Claude Code writes a tool-result row for an AskUserQuestion cancelled in the
- *  TUI (`is_error`), so a selector the user escaped reads as resolved here. */
+ *  TUI (`is_error`), so a selector the user escaped reads as resolved here. That
+ *  result is immediately followed by the interrupt row, so a formed verdict
+ *  outlives turn boundaries; only a fresh matching call un-resolves the ask. */
 export function isAskResolvedInTranscript(
   ask: AskPrompt,
   messages: readonly NativeChatMessage[]
@@ -159,14 +161,20 @@ export function isAskResolvedInTranscript(
   let resolved = false
   for (const message of messages) {
     if (message.role === 'user' || isInterruptedStatusMessage(message)) {
-      // The turn owning these calls ended; their results never arrive. Any match
-      // seen so far belonged to a turn that is over, so re-arm from scratch.
+      // The turn owning these calls ended; their results never arrive, so the
+      // pending FIFO is void. A verdict already witnessed by a result stands —
+      // the cancel path writes the interrupt row right after the tool-result.
       outstanding = []
-      resolved = false
     }
     for (const block of message.blocks) {
       if (block.type === 'tool-call') {
-        outstanding.push(nativeChatAskDismissKey(parseToolInput(block.name, block.input)))
+        const key = nativeChatAskDismissKey(parseToolInput(block.name, block.input))
+        if (key === askKey) {
+          // The agent is asking this same question again: a live instance is
+          // outstanding, so the earlier resolution no longer describes it.
+          resolved = false
+        }
+        outstanding.push(key)
       } else if (block.type === 'tool-result' && outstanding.length > 0) {
         if (outstanding.shift() === askKey) {
           resolved = true

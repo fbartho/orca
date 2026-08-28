@@ -262,6 +262,25 @@ describe('resolveNativeChatAsk', () => {
     expect(resolved?.questions[0]?.question).toBe('Ship it?')
   })
 
+  it('keeps a cancelled ask retired after its interrupt row lands', () => {
+    // The live repro: X cancels the selector, Claude writes the is_error result
+    // then the interrupt row, and re-mounting the pane (view switch) must not
+    // bring the dead question back.
+    const liveAsk = parseAskFromStatus(JSON.stringify(QUESTIONS_INPUT))!
+    expect(
+      resolveNativeChatAsk({
+        liveAsk,
+        messages: [
+          message('m1', [call('AskUserQuestion', QUESTIONS_INPUT)]),
+          toolTurn('m2'),
+          interrupted('m3'),
+          userTurn('m4', 'ask me another question')
+        ],
+        transcriptSettled: true
+      })
+    ).toBeNull()
+  })
+
   it('does not let a different pending ask suppress the live one', () => {
     const liveAsk = parseAskFromStatus(JSON.stringify(QUESTIONS_INPUT))!
     const other = { questions: [{ question: 'Other?', options: [{ label: 'A' }] }] }
@@ -324,6 +343,42 @@ describe('isAskResolvedInTranscript', () => {
         userTurn('m2', 'never mind'),
         message('m3', [call('Bash', { command: 'ls' })]),
         toolTurn('m4')
+      ])
+    ).toBe(false)
+  })
+
+  // Measured shape of a TUI-cancelled ask (Claude Code session transcripts): the
+  // is_error tool-result lands first, then `[Request interrupted by user for tool
+  // use]`. A verdict wiped by that trailing row let stale live status win again,
+  // and remounting the pane (view switch) re-rendered the dead question.
+  it('keeps the verdict when the cancel path writes its interrupt row after the result', () => {
+    expect(
+      isAskResolvedInTranscript(ask, [
+        message('m1', [call('AskUserQuestion', QUESTIONS_INPUT)]),
+        toolTurn('m2'),
+        interrupted('m3'),
+        userTurn('m4', 'ask me another question')
+      ])
+    ).toBe(true)
+  })
+
+  it('keeps the verdict when the interrupt arrives as a plain user row', () => {
+    expect(
+      isAskResolvedInTranscript(ask, [
+        message('m1', [call('AskUserQuestion', QUESTIONS_INPUT)]),
+        toolTurn('m2'),
+        userTurn('m3', '[Request interrupted by user for tool use]')
+      ])
+    ).toBe(true)
+  })
+
+  it('un-resolves once the agent asks the same question again', () => {
+    expect(
+      isAskResolvedInTranscript(ask, [
+        message('m1', [call('AskUserQuestion', QUESTIONS_INPUT)]),
+        toolTurn('m2'),
+        userTurn('m3', 'ask me that again'),
+        message('m4', [call('AskUserQuestion', QUESTIONS_INPUT)])
       ])
     ).toBe(false)
   })
