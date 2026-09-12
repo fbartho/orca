@@ -70,6 +70,13 @@ describe('createCodeSpanPaddingSession', () => {
     const unrelated = `${SENTINEL}z${SENTINEL}`
     expect(session.restore(unrelated)).toBe(unrelated)
   })
+
+  it('leaves a literal run that matches a generated mask alone', () => {
+    const session = createCodeSpanPaddingSession()
+    const [masked] = session.mask([{ type: 'text', text: ' x ', marks: [{ type: 'code' }] }])
+    const literal = `${SENTINEL} ${SENTINEL}`
+    expect(session.restore(`${literal} before ${masked.text ?? ''}`)).toBe(`${literal} before  x `)
+  })
 })
 
 describe('code span padding round trip', () => {
@@ -89,7 +96,9 @@ describe('code span padding round trip', () => {
     [`a literal ${SENTINEL} in prose`],
     [`\`${SENTINEL}x${SENTINEL}\``],
     [`\`a${SENTINEL}b${SENTINEL}c\``],
-    [`\`${SENTINEL}${SENTINEL}\``]
+    [`\`${SENTINEL}${SENTINEL}\``],
+    [`a literal ${SENTINEL} ${SENTINEL} in prose and \`x \` after`],
+    [`\`${SENTINEL} ${SENTINEL}\` and \`x \` after`]
   ])('preserves %j', (source) => {
     expect(roundTrip(source)).toBe(source)
   })

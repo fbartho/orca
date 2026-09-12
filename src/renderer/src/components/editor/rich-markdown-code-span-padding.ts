@@ -5,6 +5,22 @@ import type { MarkdownNodeLike } from './rich-markdown-mark-boundary-walk'
 // builds its mark-delimiter probe out of U+E000 and U+E001.
 const PADDING_SENTINEL = String.fromCharCode(0xe002)
 
+// Why: distinct from the sentinel so a nonce cannot be read as a mask boundary.
+const NONCE_TERMINATOR = String.fromCharCode(0xe003)
+
+let nonceCounter = 0
+
+/**
+ * Unique per session, so a mask this session generated cannot be confused with an
+ * identical run the document holds literally. A second private-use code point
+ * terminates the digits, so a digit at the start of the padded body cannot extend
+ * the nonce; both are regex-inert.
+ */
+function nextNonce(): string {
+  nonceCounter += 1
+  return `${nonceCounter}${NONCE_TERMINATOR}`
+}
+
 function hasCodeMark(node: MarkdownNodeLike): boolean {
   return (node.marks ?? []).some(
     (mark) => (typeof mark === 'string' ? mark : mark?.type) === 'code'
@@ -12,9 +28,9 @@ function hasCodeMark(node: MarkdownNodeLike): boolean {
 }
 
 /**
- * One mask-and-restore pair. Restoration only unwraps the marks this session
- * generated, counted in the order the walk emits them, so a sentinel the document
- * already contained survives rather than being read as a mask.
+ * One mask-and-restore pair. Restoration only unwraps the masks this session
+ * generated, which carry its nonce, so a sentinel the document already contained
+ * survives rather than being read as a mask.
  */
 export type CodeSpanPaddingSession = {
   mask: (nodes: MarkdownNodeLike[]) => MarkdownNodeLike[]
@@ -25,13 +41,14 @@ export type CodeSpanPaddingSession = {
  * Each padding character fenced by a sentinel on both sides, so restoring returns the
  * original code unit. Both sides are fenced because the walk strips a leading run and
  * a trailing run, so neither end of a masked run may be a character `\s` matches.
+ * The nonce distinguishes a mask from an identical sequence the document holds
+ * literally, which no text match could tell apart.
  */
-function maskPadding(padding: string, generated: string[]): string {
-  return Array.from(padding, (character) => {
-    const fenced = `${PADDING_SENTINEL}${character}${PADDING_SENTINEL}`
-    generated.push(fenced)
-    return fenced
-  }).join('')
+function maskPadding(padding: string, nonce: string): string {
+  return Array.from(
+    padding,
+    (character) => `${PADDING_SENTINEL}${nonce}${character}${PADDING_SENTINEL}`
+  ).join('')
 }
 
 /**
@@ -42,7 +59,8 @@ function maskPadding(padding: string, generated: string[]): string {
  * its bytes.
  */
 export function createCodeSpanPaddingSession(): CodeSpanPaddingSession {
-  const generated: string[] = []
+  const nonce = nextNonce()
+  const maskPattern = new RegExp(`${PADDING_SENTINEL}${nonce}([\\s\\S])${PADDING_SENTINEL}`, 'g')
   return {
     mask: (nodes) =>
       nodes.map((node) => {
@@ -59,22 +77,10 @@ export function createCodeSpanPaddingSession(): CodeSpanPaddingSession {
         }
         return {
           ...node,
-          text: maskPadding(leading, generated) + body + maskPadding(trailing, generated)
+          text: maskPadding(leading, nonce) + body + maskPadding(trailing, nonce)
         }
       }),
-    restore: (markdown) => {
-      let output = ''
-      let cursor = 0
-      for (const fenced of generated) {
-        const at = markdown.indexOf(fenced, cursor)
-        if (at === -1) {
-          continue
-        }
-        output += markdown.slice(cursor, at) + fenced.slice(1, -1)
-        cursor = at + fenced.length
-      }
-      return output + markdown.slice(cursor)
-    }
+    restore: (markdown) => markdown.replace(maskPattern, (_match, character: string) => character)
   }
 }
 
