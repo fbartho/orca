@@ -8,6 +8,11 @@ const PADDING_SENTINEL = String.fromCharCode(0xe002)
 // Why: distinct from the sentinel so an index cannot be read as a mask boundary.
 const INDEX_TERMINATOR = String.fromCharCode(0xe003)
 
+/** A literal for embedding in a pattern source. */
+function escapeForPattern(literal: string): string {
+  return literal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
 function hasCodeMark(node: MarkdownNodeLike): boolean {
   return (node.marks ?? []).some(
     (mark) => (typeof mark === 'string' ? mark : mark?.type) === 'code'
@@ -32,26 +37,25 @@ export type CodeSpanPaddingSession = {
  * its bytes.
  */
 export function createCodeSpanPaddingSession(): CodeSpanPaddingSession {
-  // Why: the index into this table is what a placeholder encodes, so each padding
-  // character gets its own placeholder and restoration is a lookup, not a text match.
+  // Why: the index into this table is what a placeholder encodes, so restoration is a
+  // lookup, not a text match. One entry per padding run bounds it by padded spans.
   const issued: string[] = []
 
   // Why: chosen once per pass from the text going in, so it cannot collide with what
   // the document already holds. Empty until `mask` has seen the nodes.
   let fence = ''
 
-  function placeholderFor(character: string): string {
-    const index = issued.push(character) - 1
-    return `${fence}${index}${INDEX_TERMINATOR}${fence}`
-  }
-
   /**
-   * Each padding character replaced by a placeholder carrying its table index. Both
-   * ends are fenced because the walk strips a leading run and a trailing run, so
-   * neither end of a masked run may be a character `\s` matches.
+   * A padding run replaced by one placeholder carrying its table index. Both ends are
+   * fenced because the walk strips a leading run and a trailing run, so neither end of
+   * a masked run may be a character `\s` matches.
    */
   function maskPadding(padding: string): string {
-    return Array.from(padding, placeholderFor).join('')
+    if (!padding) {
+      return ''
+    }
+    const index = issued.push(padding) - 1
+    return `${fence}${index}${INDEX_TERMINATOR}${fence}`
   }
 
   /**
@@ -88,19 +92,35 @@ export function createCodeSpanPaddingSession(): CodeSpanPaddingSession {
       })
     },
     restore: (markdown) => {
-      let restored = markdown
-      issued.forEach((character, index) => {
-        const placeholder = `${fence}${index}${INDEX_TERMINATOR}${fence}`
-        // Why: the fence rules out a literal match, so a count other than one means
-        // the walk reshaped the placeholder; leaving it is safer than guessing.
-        if (restored.split(placeholder).length - 1 !== 1) {
-          return
+      if (issued.length === 0) {
+        return markdown
+      }
+      const placeholderPattern = new RegExp(
+        `${escapeForPattern(fence)}(\\d+)${INDEX_TERMINATOR}${escapeForPattern(fence)}`,
+        'g'
+      )
+      // Why: an index reached twice means the walk copied the placeholder, so neither
+      // occurrence identifies one padding run; both stay masked.
+      const seen = new Set<number>()
+      const duplicated = new Set<number>()
+      for (const match of markdown.matchAll(placeholderPattern)) {
+        const index = Number(match[1])
+        if (seen.has(index)) {
+          duplicated.add(index)
         }
-        // Why: the replacer form, because a `$` in a replacement string is a
-        // substitution pattern and a padding character is not known to exclude one.
-        restored = restored.replace(placeholder, () => character)
+        seen.add(index)
+      }
+      // Why: the replacer form, because a `$` in a replacement string is a substitution
+      // pattern and a padding character is not known to exclude one.
+      return markdown.replace(placeholderPattern, (placeholder, digits: string) => {
+        const index = Number(digits)
+        const padding = issued[index]
+        // Why: an index this session never issued belongs to the document, not the mask.
+        if (padding === undefined || duplicated.has(index)) {
+          return placeholder
+        }
+        return padding
       })
-      return restored
     }
   }
 }

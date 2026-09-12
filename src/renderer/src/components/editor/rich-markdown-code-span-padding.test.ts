@@ -2,6 +2,7 @@ import { Editor } from '@tiptap/core'
 import { describe, expect, it } from 'vitest'
 import { encodeRawMarkdownHtmlForRichEditor } from './raw-markdown-html'
 import { createCodeSpanPaddingSession } from './rich-markdown-code-span-padding'
+import type { CodeSpanPaddingSession } from './rich-markdown-code-span-padding'
 import { createRichMarkdownExtensions } from './rich-markdown-extensions'
 import { createRichMarkdownEditorCodec } from './rich-markdown-source-transport'
 
@@ -107,13 +108,78 @@ describe('createCodeSpanPaddingSession', () => {
     expect(session.restore(`${literal} ${masked.text ?? ''}`)).toBe(`${literal}  x `)
   })
 
-  it('issues a distinct placeholder per padding character', () => {
+  it('issues one distinct placeholder per padding run', () => {
     const session = createCodeSpanPaddingSession()
     const [masked] = session.mask([{ type: 'text', text: '  x  ', marks: [{ type: 'code' }] }])
     const text = masked.text ?? ''
     const distinct = new Set(text.split(SENTINEL).filter((part) => part.endsWith(TERMINATOR)))
-    expect(distinct.size).toBe(4)
+    expect(distinct.size).toBe(2)
     expect(session.restore(text)).toBe('  x  ')
+  })
+
+  it('issues one placeholder however long the run', () => {
+    const session = createCodeSpanPaddingSession()
+    const [masked] = session.mask([
+      { type: 'text', text: `${' '.repeat(500)}x`, marks: [{ type: 'code' }] }
+    ])
+    const text = masked.text ?? ''
+    expect(text.split(SENTINEL).filter((part) => part.endsWith(TERMINATOR))).toHaveLength(1)
+    expect(session.restore(text)).toBe(`${' '.repeat(500)}x`)
+  })
+
+  it('restores each run to its own characters', () => {
+    const session = createCodeSpanPaddingSession()
+    const text = `${TAB}${TAB}x${NBSP} `
+    const [masked] = session.mask([{ type: 'text', text, marks: [{ type: 'code' }] }])
+    expect(session.restore(masked.text ?? '')).toBe(text)
+  })
+})
+
+describe('restore cost', () => {
+  function maskedDocument(pads: number): { session: CodeSpanPaddingSession; markdown: string } {
+    const session = createCodeSpanPaddingSession()
+    const [masked] = session.mask([
+      { type: 'text', text: `${' '.repeat(pads)}code`, marks: [{ type: 'code' }] }
+    ])
+    return { session, markdown: `${'x'.repeat(100_000)}${masked.text ?? ''}` }
+  }
+
+  it('restores a 6,000-character pad on a 100k document well inside the serialize debounce', () => {
+    const { session, markdown } = maskedDocument(6000)
+    const started = performance.now()
+    const restored = session.restore(markdown)
+    const elapsed = performance.now() - started
+    expect(restored.endsWith(`${' '.repeat(6000)}code`)).toBe(true)
+    // Why: the serialize debounce is 300ms; a bound far under it fails on a
+    // reintroduced per-entry pass without flaking on a loaded machine.
+    expect(elapsed).toBeLessThan(50)
+  })
+
+  it('issues one table entry per padded run, not per pad character', () => {
+    const session = createCodeSpanPaddingSession()
+    const [masked] = session.mask([
+      {
+        type: 'text',
+        text: `${' '.repeat(6000)}code${' '.repeat(6000)}`,
+        marks: [{ type: 'code' }]
+      }
+    ])
+    const text = masked.text ?? ''
+    expect(text.split(SENTINEL).filter((part) => part.endsWith(TERMINATOR))).toHaveLength(2)
+  })
+
+  it('costs no more for 6,000 pad characters than for 100', () => {
+    const elapsed = (pads: number): number => {
+      const { session, markdown } = maskedDocument(pads)
+      const started = performance.now()
+      session.restore(markdown)
+      return performance.now() - started
+    }
+    // Why: warms the scan so the first measured pass is not paying for compilation.
+    elapsed(100)
+    const small = elapsed(100)
+    const large = elapsed(6000)
+    expect(large).toBeLessThan(Math.max(small * 4, 50))
   })
 })
 
