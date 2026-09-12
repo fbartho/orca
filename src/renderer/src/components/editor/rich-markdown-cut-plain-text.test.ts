@@ -8,6 +8,7 @@ import {
   getRichMarkdownSliceSerializer,
   serializeRichMarkdownSliceToMarkdown
 } from './rich-markdown-clipboard-markdown-text'
+import { RICH_MARKDOWN_CUT_RANGE } from './rich-markdown-cut-range'
 import { handleRichMarkdownCut } from './rich-markdown-cut-handler'
 import { cutVisualLine } from './rich-markdown-visual-line'
 
@@ -30,12 +31,15 @@ function createEditor(markdown: string): Editor {
     content: markdown,
     contentType: 'markdown',
     editorProps: {
-      clipboardTextSerializer: (slice, view) =>
-        serializeRichMarkdownSliceToMarkdown(
+      clipboardTextSerializer: (slice, view) => {
+        const range = RICH_MARKDOWN_CUT_RANGE.current() ?? view.state.selection
+        return serializeRichMarkdownSliceToMarkdown(
           getRichMarkdownSliceSerializer(editor),
           slice,
-          view.state.selection.$from.parent
+          view.state.doc.resolve(range.from),
+          range.to
         )
+      }
     }
   })
   return editor
@@ -112,6 +116,20 @@ describe('cut paths write markdown to the plain-text flavor', () => {
     cutVisualLine(editor.view, createCutEvent(clipboardData), { from: 1, to: paragraphEnd })
 
     expect(clipboardData.getData('text/plain')).toBe('A paragraph with **bold text** inside.')
+  })
+
+  it('cuts an ordered list item keeping its number', () => {
+    const editor = createEditor('1. First item\n2. Second item\n3. Third item')
+    const secondPos = findParagraphPos(editor, 'Second item')
+
+    expect(cutAt(editor, secondPos + 2).getData('text/plain')).toBe('2. Second item')
+  })
+
+  it('cuts a blockquote paragraph keeping its prefix', () => {
+    const editor = createEditor('> Line one\n>\n> Line two\n>\n> Line three')
+    const secondPos = findParagraphPos(editor, 'Line two')
+
+    expect(cutAt(editor, secondPos + 2).getData('text/plain')).toBe('> Line two')
   })
 
   it('falls back to visible text on a view without a serializer', () => {
