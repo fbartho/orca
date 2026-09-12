@@ -33,18 +33,31 @@ function nextFence(fence: OpenFence | undefined, line: string): OpenFence | unde
   return closes ? undefined : fence
 }
 
+/**
+ * One run of an item's own lines. An item holds several when nested lists divide
+ * its content, and each run's position among the item's nested runs fixes where
+ * its tokens land among the item's children.
+ */
+type ContentRun = {
+  lines: string[]
+  /** How many nested runs opened under this item before this one's lines. */
+  after: number
+}
+
 /** An ordered item under construction, with the lines that belong to it. */
 type CollectedItem = {
   indent: number
   column: number
   number: number
-  /** Lines of the item's own content, before any nested list opens under it. */
-  leadingLines: string[]
-  /** Lines that follow a nested list inside the same item. */
-  trailingLines: string[]
+  /** The item's own lines, split into runs by the nested lists between them. */
+  runs: ContentRun[]
   rawLines: string[]
-  /** Whether a nested item has opened under this one. */
-  nested: boolean
+  /** How many separate nested-list runs have opened under this item. */
+  nestedRuns: number
+  /** Whether the most recent line under this item opened or extended a nested run. */
+  inNestedRun: boolean
+  /** Index of the parent's nested run this item belongs to. */
+  run: number
 }
 
 type OpenFrame = { indent: number; column: number; item: CollectedItem }
@@ -72,16 +85,23 @@ function collectOrderedItems(lines: string[]): [CollectedItem[], number] {
         stack.pop()
       }
       for (const frame of stack) {
-        frame.item.nested = true
+        // Why: an item interrupted by its own content since the last nested item
+        // starts a new nested run rather than extending the previous one.
+        if (!frame.item.inNestedRun) {
+          frame.item.nestedRuns += 1
+          frame.item.inNestedRun = true
+        }
       }
+      const parent = stack.at(-1)
       const item: CollectedItem = {
         indent: itemIndent,
         column: itemIndent + number.length + 1 + gap.length,
         number: Number(number),
-        leadingLines: [content],
-        trailingLines: [],
+        runs: [{ lines: [content], after: 0 }],
         rawLines: [line],
-        nested: false
+        nestedRuns: 0,
+        inNestedRun: false,
+        run: parent === undefined ? 0 : parent.item.nestedRuns - 1
       }
       items.push(item)
       stack.push({ indent: item.indent, column: item.column, item })
@@ -109,11 +129,14 @@ function collectOrderedItems(lines: string[]): [CollectedItem[], number] {
       continue
     }
     const leading = line.match(/^[ \t]*/)?.[0].length ?? 0
+    // Why: lazy continuation only extends a paragraph, so a line that opens a
+    // block is placed by its own indent even with no blank line before it.
+    const opensBlock = openFence === undefined && BLOCK_CONTENT_LINE.test(line.trimStart())
     // Why: without an intervening blank line the line lazily continues the
     // innermost open item's paragraph whatever its own indent, so only a line
     // after a blank one may be claimed by an outer item.
     let owner: OpenFrame | undefined = innermost
-    if (sawBlank && openFence === undefined) {
+    if ((sawBlank || opensBlock) && openFence === undefined) {
       // Why: a line indented less than every frame's content column belongs to no
       // item, which ends the list rather than joining its outermost one.
       owner = stack.findLast((frame) => leading >= frame.column)
@@ -132,16 +155,30 @@ function collectOrderedItems(lines: string[]): [CollectedItem[], number] {
 }
 
 function appendToItem(item: CollectedItem, content: string, raw: string): void {
-  if (item.nested) {
-    item.trailingLines.push(content)
-  } else {
-    item.leadingLines.push(content)
-  }
   item.rawLines.push(raw)
+  // Why: a blank line separates two items of one nested list, so it neither ends
+  // the open nested run nor belongs to the item's own content around it.
+  if (content.trim() === '' && item.inNestedRun) {
+    return
+  }
+  const current = item.runs.at(-1)
+  if (current !== undefined && current.after === item.nestedRuns) {
+    current.lines.push(content)
+  } else {
+    item.runs.push({ lines: [content], after: item.nestedRuns })
+  }
+  item.inNestedRun = false
 }
 
-/** Splits an item's own lines at the first blank or block-opening line. */
-function splitItemContent(contentLines: string[]): {
+/**
+ * Splits one run of an item's lines at the first blank or block-opening line.
+ * `opensItem` marks the run that carries the item's marker line, whose first line
+ * is the item's own text and so may not open a block.
+ */
+function splitItemContent(
+  contentLines: string[],
+  opensItem: boolean
+): {
   paragraphLines: string[]
   blockLines: string[]
 } {
@@ -158,7 +195,7 @@ function splitItemContent(contentLines: string[]): {
       blockLines.push(line)
       continue
     }
-    if (paragraphLines.length > 0 && BLOCK_CONTENT_LINE.test(line.trimStart())) {
+    if ((paragraphLines.length > 0 || !opensItem) && BLOCK_CONTENT_LINE.test(line.trimStart())) {
       reachedBlock = true
       blockLines.push(line)
       continue
@@ -189,6 +226,30 @@ function trimBlockText(lines: string[]): string {
     .join('\n')
 }
 
+/**
+ * The slice of an item's descendants that forms one of its nested-list runs: the
+ * direct children carrying that run index, each followed by its own descendants.
+ * Only direct children's `run` values index this item's runs, so a deeper item is
+ * placed by the child it sits under.
+ */
+function nestedRun(
+  descendants: CollectedItem[],
+  childIndent: number,
+  run: number
+): CollectedItem[] {
+  const result: CollectedItem[] = []
+  let keeping = false
+  for (const entry of descendants) {
+    if (entry.indent <= childIndent) {
+      keeping = entry.run === run
+    }
+    if (keeping) {
+      result.push(entry)
+    }
+  }
+  return result
+}
+
 /** Turns the collected items at one nesting level into `list_item` tokens. */
 function buildListItems(
   items: CollectedItem[],
@@ -203,43 +264,51 @@ function buildListItems(
       index += 1
       continue
     }
-    const { paragraphLines, blockLines } = splitItemContent(item.leadingLines)
-    const tokens: Token[] = []
-    const mainText = paragraphLines.join('\n').trim()
-    if (mainText) {
-      tokens.push({
-        type: 'paragraph',
-        raw: mainText,
-        text: mainText,
-        tokens: lexer.inlineTokens(mainText)
-      } as Tokens.Paragraph)
-    }
-    const blockText = trimBlockText(blockLines)
-    if (blockText) {
-      tokens.push(...lexer.blockTokens(blockText))
-    }
     let lookAhead = index + 1
     const nested: CollectedItem[] = []
     while (lookAhead < items.length && items[lookAhead].indent > baseIndent) {
       nested.push(items[lookAhead])
       lookAhead += 1
     }
-    if (nested.length > 0) {
-      const nextIndent = Math.min(...nested.map((entry) => entry.indent))
-      tokens.push({
-        type: 'list',
-        ordered: true,
-        start: nested[0].number,
-        loose: false,
-        items: buildListItems(nested, nextIndent, lexer),
-        raw: nested.map((entry) => entry.rawLines.join('\n')).join('\n')
-      } as Tokens.List)
-    }
-    // Why: content after a nested list belongs to the same item but must follow
-    // the nested list token so the item's children keep their source order.
-    const trailingText = trimBlockText(item.trailingLines)
-    if (trailingText) {
-      tokens.push(...lexer.blockTokens(trailingText))
+    const childIndent = nested.length > 0 ? Math.min(...nested.map((entry) => entry.indent)) : 0
+    const tokens: Token[] = []
+    let mainText = ''
+    // Why: an item's own content and its nested lists interleave, so each run of
+    // either is emitted at its own position to keep the children in source order.
+    for (let run = 0; run <= item.nestedRuns; run += 1) {
+      for (const content of item.runs.filter((entry) => entry.after === run)) {
+        const { paragraphLines, blockLines } = splitItemContent(
+          content.lines,
+          content === item.runs[0]
+        )
+        const paragraphText = paragraphLines.join('\n').trim()
+        if (paragraphText) {
+          if (!mainText) {
+            mainText = paragraphText
+          }
+          tokens.push({
+            type: 'paragraph',
+            raw: paragraphText,
+            text: paragraphText,
+            tokens: lexer.inlineTokens(paragraphText)
+          } as Tokens.Paragraph)
+        }
+        const blockText = trimBlockText(blockLines)
+        if (blockText) {
+          tokens.push(...lexer.blockTokens(blockText))
+        }
+      }
+      const runItems = nestedRun(nested, childIndent, run)
+      if (runItems.length > 0) {
+        tokens.push({
+          type: 'list',
+          ordered: true,
+          start: runItems[0].number,
+          loose: false,
+          items: buildListItems(runItems, childIndent, lexer),
+          raw: runItems.map((entry) => entry.rawLines.join('\n')).join('\n')
+        } as Tokens.List)
+      }
     }
     result.push({
       type: 'list_item',

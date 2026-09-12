@@ -212,3 +212,113 @@ describe('block context inside an ordered list', () => {
     expect(current).toBe(source)
   })
 })
+
+describe('interleaved content between nested ordered-list runs', () => {
+  function itemChildren(source: string): string[] {
+    const [list] = documentContent(source)
+    const item = (list.content ?? [])[0]
+
+    return (item.content ?? []).map((child) => child.type ?? '')
+  }
+
+  it.each([
+    ['1. a\n   1. b\n\n   c\n   1. d', '1. a\n   1. b\n\n   c\n   1. d'],
+    ['1. a\n   1. b\n\n   c\n\n   1. d\n   1. e', '1. a\n   1. b\n\n   c\n   1. d\n   2. e'],
+    ['10. a\n    1. b\n\n    c\n    1. d', '10. a\n    1. b\n\n    c\n    1. d']
+  ])('keeps the block between two nested runs in %j in place', (source, expected) => {
+    expect(roundTrip(source)).toBe(expected)
+  })
+
+  it.each([
+    ['1. a\n   1. b\n\n   c\n   1. d'],
+    ['1. a\n   1. b\n\n   c\n\n   1. d\n   1. e'],
+    ['10. a\n    1. b\n\n    c\n    1. d']
+  ])('gives %j a paragraph between two separate nested lists', (source) => {
+    expect(itemChildren(source)).toEqual(['paragraph', 'orderedList', 'paragraph', 'orderedList'])
+  })
+
+  it('starts the second nested run at its own number', () => {
+    expect(roundTrip('1. a\n   4. b\n\n   c\n   7. d')).toBe('1. a\n   4. b\n\n   c\n   7. d')
+  })
+
+  it('keeps a fenced block between two nested runs', () => {
+    const source = '1. a\n   1. b\n\n   ```\n   fenced\n   ```\n\n   1. d'
+
+    expect(itemChildren(source)).toEqual(['paragraph', 'orderedList', 'codeBlock', 'orderedList'])
+  })
+
+  it('splits three runs of one item at each intervening paragraph', () => {
+    const source = '1. a\n   1. b\n\n   c\n   1. d\n\n   e\n   1. f'
+
+    expect(itemChildren(source)).toEqual([
+      'paragraph',
+      'orderedList',
+      'paragraph',
+      'orderedList',
+      'paragraph',
+      'orderedList'
+    ])
+    expect(roundTrip(source)).toBe(source)
+  })
+
+  it('splits the run at the depth the intervening block sits at', () => {
+    const source = '1. a\n   1. b\n      1. c\n\n      x\n      1. e'
+    const [list] = documentContent(source)
+    const outer = (list.content ?? [])[0]
+    const nested = (outer.content ?? [])[1]
+    const inner = (nested.content ?? [])[0]
+
+    expect((inner.content ?? []).map((child) => child.type)).toEqual([
+      'paragraph',
+      'orderedList',
+      'paragraph',
+      'orderedList'
+    ])
+  })
+
+  it('keeps interleaving independent between sibling items', () => {
+    const source = '1. a\n   1. b\n\n   c\n   1. d\n2. e\n   1. f\n\n   g\n   1. h'
+
+    expect(roundTrip(source)).toBe(source)
+  })
+
+  it('keeps a blockquote between two nested runs', () => {
+    expect(itemChildren('1. a\n   1. b\n\n   > q\n\n   1. d')).toEqual([
+      'paragraph',
+      'orderedList',
+      'blockquote',
+      'orderedList'
+    ])
+  })
+
+  it('keeps a bullet run and a paragraph inside an ordered item in order', () => {
+    expect(itemChildren('1. a\n   - b\n\n   c\n   - d')).toEqual([
+      'paragraph',
+      'bulletList',
+      'paragraph',
+      'bulletList'
+    ])
+  })
+
+  it('keeps an ordered run and its following content inside a bullet item in order', () => {
+    const children = itemChildren('- a\n  1. b\n\n  c\n  1. d')
+
+    expect(children.filter((type) => type === 'orderedList')).toHaveLength(2)
+    expect(children.indexOf('orderedList')).toBeLessThan(children.lastIndexOf('orderedList'))
+    expect(children).toHaveLength(4)
+  })
+
+  it.each([
+    ['1. a\n   1. b\n\n   c\n   1. d'],
+    ['1. a\n   1. b\n\n   ```\n   fenced\n   ```\n\n   1. d'],
+    ['10. a\n    1. b\n\n    c\n    1. d']
+  ])('keeps %j stable across three cycles', (source) => {
+    const first = roundTrip(source)
+    let current = first
+    for (let cycle = 0; cycle < 3; cycle += 1) {
+      current = roundTrip(current)
+    }
+
+    expect(current).toBe(first)
+  })
+})
