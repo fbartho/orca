@@ -5,21 +5,8 @@ import type { MarkdownNodeLike } from './rich-markdown-mark-boundary-walk'
 // builds its mark-delimiter probe out of U+E000 and U+E001.
 const PADDING_SENTINEL = String.fromCharCode(0xe002)
 
-// Why: distinct from the sentinel so a nonce cannot be read as a mask boundary.
-const NONCE_TERMINATOR = String.fromCharCode(0xe003)
-
-let nonceCounter = 0
-
-/**
- * Unique per session, so a mask this session generated cannot be confused with an
- * identical run the document holds literally. A second private-use code point
- * terminates the digits, so a digit at the start of the padded body cannot extend
- * the nonce; both are regex-inert.
- */
-function nextNonce(): string {
-  nonceCounter += 1
-  return `${nonceCounter}${NONCE_TERMINATOR}`
-}
+// Why: distinct from the sentinel so an index cannot be read as a mask boundary.
+const INDEX_TERMINATOR = String.fromCharCode(0xe003)
 
 function hasCodeMark(node: MarkdownNodeLike): boolean {
   return (node.marks ?? []).some(
@@ -28,27 +15,13 @@ function hasCodeMark(node: MarkdownNodeLike): boolean {
 }
 
 /**
- * One mask-and-restore pair. Restoration only unwraps the masks this session
- * generated, which carry its nonce, so a sentinel the document already contained
- * survives rather than being read as a mask.
+ * One mask-and-restore pair. Restoration replaces placeholders this session issued,
+ * identified by their position in its own table rather than by their text, so a
+ * document that already holds an identical run is left alone.
  */
 export type CodeSpanPaddingSession = {
   mask: (nodes: MarkdownNodeLike[]) => MarkdownNodeLike[]
   restore: (markdown: string) => string
-}
-
-/**
- * Each padding character fenced by a sentinel on both sides, so restoring returns the
- * original code unit. Both sides are fenced because the walk strips a leading run and
- * a trailing run, so neither end of a masked run may be a character `\s` matches.
- * The nonce distinguishes a mask from an identical sequence the document holds
- * literally, which no text match could tell apart.
- */
-function maskPadding(padding: string, nonce: string): string {
-  return Array.from(
-    padding,
-    (character) => `${PADDING_SENTINEL}${nonce}${character}${PADDING_SENTINEL}`
-  ).join('')
 }
 
 /**
@@ -59,11 +32,44 @@ function maskPadding(padding: string, nonce: string): string {
  * its bytes.
  */
 export function createCodeSpanPaddingSession(): CodeSpanPaddingSession {
-  const nonce = nextNonce()
-  const maskPattern = new RegExp(`${PADDING_SENTINEL}${nonce}([\\s\\S])${PADDING_SENTINEL}`, 'g')
+  // Why: the index into this table is what a placeholder encodes, so each padding
+  // character gets its own placeholder and restoration is a lookup, not a text match.
+  const issued: string[] = []
+
+  // Why: chosen once per pass from the text going in, so it cannot collide with what
+  // the document already holds. Empty until `mask` has seen the nodes.
+  let fence = ''
+
+  function placeholderFor(character: string): string {
+    const index = issued.push(character) - 1
+    return `${fence}${index}${INDEX_TERMINATOR}${fence}`
+  }
+
+  /**
+   * Each padding character replaced by a placeholder carrying its table index. Both
+   * ends are fenced because the walk strips a leading run and a trailing run, so
+   * neither end of a masked run may be a character `\s` matches.
+   */
+  function maskPadding(padding: string): string {
+    return Array.from(padding, placeholderFor).join('')
+  }
+
+  /**
+   * A sentinel run one longer than the longest the incoming text holds, so no
+   * placeholder built from it can occur in the document literally.
+   */
+  function chooseFence(nodes: MarkdownNodeLike[]): string {
+    const longest = nodes.reduce((longestSoFar, node) => {
+      const runs = (node?.text ?? '').match(new RegExp(`${PADDING_SENTINEL}+`, 'g')) ?? []
+      return runs.reduce((best, run) => Math.max(best, run.length), longestSoFar)
+    }, 0)
+    return PADDING_SENTINEL.repeat(longest + 1)
+  }
+
   return {
-    mask: (nodes) =>
-      nodes.map((node) => {
+    mask: (nodes) => {
+      fence = chooseFence(nodes)
+      return nodes.map((node) => {
         if (node?.type !== 'text' || !hasCodeMark(node)) {
           return node
         }
@@ -77,10 +83,25 @@ export function createCodeSpanPaddingSession(): CodeSpanPaddingSession {
         }
         return {
           ...node,
-          text: maskPadding(leading, nonce) + body + maskPadding(trailing, nonce)
+          text: maskPadding(leading) + body + maskPadding(trailing)
         }
-      }),
-    restore: (markdown) => markdown.replace(maskPattern, (_match, character: string) => character)
+      })
+    },
+    restore: (markdown) => {
+      let restored = markdown
+      issued.forEach((character, index) => {
+        const placeholder = `${fence}${index}${INDEX_TERMINATOR}${fence}`
+        // Why: the fence rules out a literal match, so a count other than one means
+        // the walk reshaped the placeholder; leaving it is safer than guessing.
+        if (restored.split(placeholder).length - 1 !== 1) {
+          return
+        }
+        // Why: the replacer form, because a `$` in a replacement string is a
+        // substitution pattern and a padding character is not known to exclude one.
+        restored = restored.replace(placeholder, () => character)
+      })
+      return restored
+    }
   }
 }
 

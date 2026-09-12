@@ -23,6 +23,11 @@ function roundTrip(source: string): string {
 const TAB = '\t'
 const NBSP = String.fromCharCode(0x00a0)
 const SENTINEL = String.fromCharCode(0xe002)
+const TERMINATOR = String.fromCharCode(0xe003)
+
+function placeholder(index: number): string {
+  return `${SENTINEL}${index}${TERMINATOR}${SENTINEL}`
+}
 
 describe('createCodeSpanPaddingSession', () => {
   it('leaves a node without a code mark alone', () => {
@@ -77,6 +82,39 @@ describe('createCodeSpanPaddingSession', () => {
     const literal = `${SENTINEL} ${SENTINEL}`
     expect(session.restore(`${literal} before ${masked.text ?? ''}`)).toBe(`${literal} before  x `)
   })
+
+  it('leaves an unpadded span carrying this session first placeholder alone', () => {
+    const session = createCodeSpanPaddingSession()
+    const text = `${placeholder(0)}x`
+    const [masked] = session.mask([{ type: 'text', text, marks: [{ type: 'code' }] }])
+    expect(masked.text).toBe(text)
+    expect(session.restore(masked.text ?? '')).toBe(text)
+  })
+
+  it('leaves padding masked when the document duplicates its placeholder', () => {
+    const session = createCodeSpanPaddingSession()
+    const [masked] = session.mask([{ type: 'text', text: ' x ', marks: [{ type: 'code' }] }])
+    const collision = placeholder(0)
+    const restored = session.restore(`${collision} before ${masked.text ?? ''}`)
+    expect(restored).toContain(collision)
+    expect(restored.endsWith('x ')).toBe(true)
+  })
+
+  it('restores a padded span in a document that also holds a literal placeholder', () => {
+    const session = createCodeSpanPaddingSession()
+    const [masked] = session.mask([{ type: 'text', text: ' x ', marks: [{ type: 'code' }] }])
+    const literal = placeholder(7)
+    expect(session.restore(`${literal} ${masked.text ?? ''}`)).toBe(`${literal}  x `)
+  })
+
+  it('issues a distinct placeholder per padding character', () => {
+    const session = createCodeSpanPaddingSession()
+    const [masked] = session.mask([{ type: 'text', text: '  x  ', marks: [{ type: 'code' }] }])
+    const text = masked.text ?? ''
+    const distinct = new Set(text.split(SENTINEL).filter((part) => part.endsWith(TERMINATOR)))
+    expect(distinct.size).toBe(4)
+    expect(session.restore(text)).toBe('  x  ')
+  })
 })
 
 describe('code span padding round trip', () => {
@@ -98,21 +136,39 @@ describe('code span padding round trip', () => {
     [`\`a${SENTINEL}b${SENTINEL}c\``],
     [`\`${SENTINEL}${SENTINEL}\``],
     [`a literal ${SENTINEL} ${SENTINEL} in prose and \`x \` after`],
-    [`\`${SENTINEL} ${SENTINEL}\` and \`x \` after`]
+    [`\`${SENTINEL} ${SENTINEL}\` and \`x \` after`],
+    [`\`${SENTINEL}0${TERMINATOR}${SENTINEL}x\``],
+    [`\`${SENTINEL}1${TERMINATOR}x${SENTINEL}\``],
+    [`a literal ${SENTINEL}0${TERMINATOR}${SENTINEL} in prose and \`x \` after`],
+    [`\`${SENTINEL}0${TERMINATOR}${SENTINEL}\` and \`x \` after`]
   ])('preserves %j', (source) => {
     expect(roundTrip(source)).toBe(source)
   })
 
-  it.each([['`  `'], ['`   `'], ['a `  ` b'], [`\`${TAB}x${TAB}\``]])(
-    'keeps %j stable across three cycles',
-    (source) => {
-      let current = source
-      for (let cycle = 0; cycle < 3; cycle += 1) {
-        current = roundTrip(current)
-      }
-      expect(current).toBe(source)
+  it.each([
+    ['`  `'],
+    ['`   `'],
+    ['a `  ` b'],
+    [`\`${TAB}x${TAB}\``],
+    [`a literal ${SENTINEL}0${TERMINATOR}${SENTINEL} in prose and \`x \` after`]
+  ])('keeps %j stable across three cycles', (source) => {
+    let current = source
+    for (let cycle = 0; cycle < 3; cycle += 1) {
+      current = roundTrip(current)
     }
-  )
+    expect(current).toBe(source)
+  })
+
+  it.each([
+    [
+      `- a literal ${SENTINEL}${SENTINEL}0${TERMINATOR}${SENTINEL}${SENTINEL} in a list\n- and \`x \` after`
+    ],
+    [`> quote with ${SENTINEL}0${TERMINATOR}${SENTINEL}\n>\n> and \`x \` after`],
+    [`- \`${SENTINEL}0${TERMINATOR}${SENTINEL}\`\n- \`y \``],
+    [`1. deep\n   - \`${SENTINEL}${SENTINEL}0${TERMINATOR}${SENTINEL}${SENTINEL}\`\n   - \`z \``]
+  ])('preserves %j across the nested walks', (source) => {
+    expect(roundTrip(source)).toBe(source)
+  })
 
   it('is stable across three cycles', () => {
     const source = 'Read `Anexo v2.docx ` and write up.'
