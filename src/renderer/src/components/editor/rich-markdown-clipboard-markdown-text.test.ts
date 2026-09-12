@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest'
 import { Editor } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
 import { createIsolatedMarkdownExtensionForTests } from './isolated-markdown-extension-for-tests'
+import { createRichMarkdownExtensions } from './rich-markdown-extensions'
+import { createRichMarkdownEditorCodec } from './rich-markdown-source-transport'
 import {
   getRichMarkdownSliceSerializer,
   serializeRichMarkdownSliceToMarkdown
@@ -36,13 +38,33 @@ function serializeRange(editor: Editor, from: number, to: number): string {
   return serializeRichMarkdownSliceToMarkdown(
     getRichMarkdownSliceSerializer(editor),
     editor.state.doc.slice(from, to),
-    editor.state.doc.resolve(from).parent
+    editor.state.doc.resolve(from),
+    to
   )
+}
+
+/** Start of the text inside the first textblock whose content matches `text`. */
+function textStartOf(editor: Editor, text: string): number {
+  return findNodePos(editor, (node) => node.isTextblock && node.textContent === text) + 1
+}
+
+/** Position just past the last character of the first textblock matching `text`. */
+function textEndOf(editor: Editor, text: string): number {
+  const pos = findNodePos(editor, (node) => node.isTextblock && node.textContent === text)
+  const node = editor.state.doc.nodeAt(pos)
+  if (!node) {
+    throw new Error('textblock not found')
+  }
+  return pos + node.nodeSize - 1
 }
 
 function findNodePos(
   editor: Editor,
-  predicate: (node: { type: { name: string }; textContent: string }) => boolean
+  predicate: (node: {
+    type: { name: string }
+    textContent: string
+    isTextblock: boolean
+  }) => boolean
 ): number {
   let found = -1
   editor.state.doc.descendants((node, pos) => {
@@ -233,6 +255,129 @@ describe('serializeRichMarkdownSliceToMarkdown', () => {
     })
   })
 
+  describe('selections inside one list or blockquote', () => {
+    it('keeps ordered numbering for a subset starting at the first item', () => {
+      const editor = createEditor('1. First item\n2. Second item\n3. Third item')
+
+      expect(
+        serializeRange(editor, textStartOf(editor, 'First item'), textEndOf(editor, 'Second item'))
+      ).toBe('1. First item\n2. Second item')
+    })
+
+    it('numbers an ordered subset from the first selected item', () => {
+      const editor = createEditor('1. First item\n2. Second item\n3. Third item')
+
+      expect(
+        serializeRange(editor, textStartOf(editor, 'Second item'), textEndOf(editor, 'Third item'))
+      ).toBe('2. Second item\n3. Third item')
+    })
+
+    it('carries the list start attribute into an ordered subset', () => {
+      const editor = createEditor('5. Fifth item\n6. Sixth item\n7. Seventh item')
+
+      expect(
+        serializeRange(editor, textStartOf(editor, 'Sixth item'), textEndOf(editor, 'Seventh item'))
+      ).toBe('6. Sixth item\n7. Seventh item')
+    })
+
+    it('keeps bullet markers without blank lines for a subset of one list', () => {
+      const editor = createEditor('- First item\n- Second item\n- Third item')
+
+      expect(
+        serializeRange(editor, textStartOf(editor, 'First item'), textEndOf(editor, 'Second item'))
+      ).toBe('- First item\n- Second item')
+    })
+
+    it('keeps the marker for a selection starting and ending mid-item', () => {
+      const editor = createEditor('1. First item\n2. Second item\n3. Third item')
+      const from = textStartOf(editor, 'First item') + 'First '.length
+      const to = textStartOf(editor, 'Second item') + 'Second'.length
+
+      expect(editor.state.doc.textBetween(from, to, '|')).toBe('item|Second')
+      expect(serializeRange(editor, from, to)).toBe('1. item\n2. Second')
+    })
+
+    it('keeps the inner list markers for a subset of a nested list', () => {
+      const editor = createEditor('- Alpha\n  - Beta\n  - Gamma\n- Delta')
+
+      expect(serializeRange(editor, textStartOf(editor, 'Beta'), textEndOf(editor, 'Gamma'))).toBe(
+        '- Beta\n- Gamma'
+      )
+    })
+
+    it('keeps the blockquote prefix for a subset of one blockquote', () => {
+      const editor = createEditor('> Line one\n>\n> Line two\n>\n> Line three')
+
+      expect(
+        serializeRange(editor, textStartOf(editor, 'Line one'), textEndOf(editor, 'Line two'))
+      ).toBe('> Line one\n>\n> Line two')
+    })
+
+    it('keeps one blockquote level for a subset of a nested blockquote', () => {
+      const editor = createEditor('> > Inner one\n> >\n> > Inner two')
+
+      expect(
+        serializeRange(editor, textStartOf(editor, 'Inner one'), textEndOf(editor, 'Inner two'))
+      ).toBe('> Inner one\n>\n> Inner two')
+    })
+  })
+
+  describe('ancestors only the production extension set provides', () => {
+    function createProductionEditor(markdown: string): Editor {
+      return new Editor({
+        element: null,
+        extensions: createRichMarkdownExtensions({ codec: createRichMarkdownEditorCodec() }),
+        content: markdown,
+        contentType: 'markdown'
+      })
+    }
+
+    function serializeProductionRange(editor: Editor, first: string, last: string): string {
+      return serializeRichMarkdownSliceToMarkdown(
+        getRichMarkdownSliceSerializer(editor),
+        editor.state.doc.slice(textStartOf(editor, first), textEndOf(editor, last)),
+        editor.state.doc.resolve(textStartOf(editor, first)),
+        textEndOf(editor, last)
+      )
+    }
+
+    it('keeps checkbox markers for a subset of one task list', () => {
+      const editor = createProductionEditor('- [ ] Alpha\n- [x] Beta\n- [ ] Gamma')
+
+      expect(serializeProductionRange(editor, 'Alpha', 'Beta')).toBe('- [ ] Alpha\n- [x] Beta')
+    })
+
+    it('carries the header row into a selection of table body rows', () => {
+      const editor = createProductionEditor('| a | b |\n| --- | --- |\n| c1 | c2 |\n| d1 | d2 |')
+
+      expect(serializeProductionRange(editor, 'c1', 'd2')).toBe(
+        '\n| a   | b   |\n| --- | --- |\n| c1  | c2  |\n| d1  | d2  |\n'
+      )
+    })
+
+    it('carries the header row into a selection of cells in one row', () => {
+      const editor = createProductionEditor('| a | b |\n| --- | --- |\n| c1 | c2 |\n| d1 | d2 |')
+
+      expect(serializeProductionRange(editor, 'c1', 'c2')).toBe(
+        '\n| a   | b   |\n| --- | --- |\n| c1  | c2  |\n'
+      )
+    })
+
+    it('does not repeat the header row for a selection inside it', () => {
+      const editor = createProductionEditor('| a | b |\n| --- | --- |\n| c1 | c2 |\n| d1 | d2 |')
+
+      expect(serializeProductionRange(editor, 'a', 'b')).toBe('\n| a   | b   |\n| --- | --- |\n')
+    })
+
+    it('leaves a details body selection as prose', () => {
+      const editor = createProductionEditor(
+        '<details><summary>Sum</summary>\n\nPara one\n\nPara two\n\n</details>'
+      )
+
+      expect(serializeProductionRange(editor, 'Para one', 'Para two')).toBe('Para one\n\nPara two')
+    })
+  })
+
   it('falls back to block-joined text when no serializer is available', () => {
     const editor = new Editor({
       element: null,
@@ -242,7 +387,12 @@ describe('serializeRichMarkdownSliceToMarkdown', () => {
     const slice = editor.state.doc.slice(0, editor.state.doc.content.size)
 
     expect(
-      serializeRichMarkdownSliceToMarkdown(undefined, slice, editor.state.doc.resolve(1).parent)
+      serializeRichMarkdownSliceToMarkdown(
+        undefined,
+        slice,
+        editor.state.doc.resolve(1),
+        editor.state.doc.content.size
+      )
     ).toBe('first\n\nsecond')
   })
 })
