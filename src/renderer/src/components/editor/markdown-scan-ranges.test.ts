@@ -76,6 +76,41 @@ describe('findDetailsBlockStart with fenced content', () => {
   })
 })
 
+describe('findDetailsBlockStart cost on documents without a toggle', () => {
+  // marked calls the start hook once per paragraph over the remaining source,
+  // so a full range scan per call makes parsing quadratic in document size.
+  it('parses a large toggle-free document within a generous bound', () => {
+    const paragraphs = Array.from(
+      { length: 300 },
+      (_, index) => `Paragraph ${index} ${'lorem ipsum dolor sit amet '.repeat(25)}`
+    )
+    const document = paragraphs.join('\n\n')
+    expect(document.length).toBeGreaterThan(200_000)
+
+    const started = performance.now()
+    let offset = 0
+    for (const paragraph of paragraphs) {
+      expect(findDetailsBlockStart(document.slice(offset))).toBe(-1)
+      offset += paragraph.length + 2
+    }
+
+    expect(performance.now() - started).toBeLessThan(1_000)
+  })
+
+  it('still finds a toggle that follows a long run of prose', () => {
+    const prose = Array.from({ length: 300 }, (_, index) => `Paragraph ${index}.`).join('\n\n')
+    const document = `${prose}\n\n<details>\n<summary>S</summary>\n\nbody\n\n</details>`
+
+    expect(findDetailsBlockStart(document)).toBe(document.indexOf('<details>'))
+  })
+
+  it('finds an uppercase opening tag the lowercase fast path misses', () => {
+    const document = 'Prose paragraph.\n\n<DETAILS>\n<summary>S</summary>\n\nbody\n\n</DETAILS>'
+
+    expect(findDetailsBlockStart(document)).toBe(document.indexOf('<DETAILS>'))
+  })
+})
+
 describe('markdownFenceRanges', () => {
   it('covers the opening delimiter, content, and closing delimiter', () => {
     const content = ['```', 'x', '```', ''].join('\n')

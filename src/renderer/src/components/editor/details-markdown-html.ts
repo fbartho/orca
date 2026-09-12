@@ -93,6 +93,8 @@ export function renderDetailsAttributes(attrs: Record<string, unknown> | undefin
   return attributes.join(' ')
 }
 
+const DETAILS_TAG_PROBE = /<details/i
+
 // marked's block scanner calls this on raw, not-yet-lexed source to decide
 // where to cut a paragraph, so it must independently exclude fenced code and
 // inline code spans or a `<details` mention inside either gets treated as a
@@ -100,8 +102,15 @@ export function renderDetailsAttributes(attrs: Record<string, unknown> | undefin
 // to start a line (indented at most three spaces); mid-line text can't open
 // one.
 export function findDetailsBlockStart(content: string): number {
+  // Why: marked calls this once per paragraph over the remaining source, so a
+  // document with no toggle must cost a substring search, not two full scans.
+  // The native lowercase search runs first; it far outruns the regex on a miss.
+  if (!content.includes('<details') && !DETAILS_TAG_PROBE.test(content)) {
+    return -1
+  }
+
   const fenceRanges = markdownFenceRanges(content)
-  const codeSpanRanges = markdownCodeSpanRanges(content)
+  const codeSpanRanges = markdownCodeSpanRanges(content, fenceRanges)
   const tagPattern = /<details\b/gi
 
   for (;;) {
