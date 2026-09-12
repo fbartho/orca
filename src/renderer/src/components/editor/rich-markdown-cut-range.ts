@@ -1,7 +1,9 @@
 /**
  * The document range a cut is serializing. `clipboardTextSerializer` has a
- * fixed `(slice, view)` signature, and the cut paths serialize a computed
- * range rather than the view's selection, so the range travels here for the
+ * fixed `(slice, view)` signature, and both hand-rolled cut paths run only for
+ * an empty selection — `handleRichMarkdownCut` defers any non-empty selection
+ * to ProseMirror — so they expand a caret into a computed range that
+ * `view.state.selection` does not span. The range travels here for the
  * duration of that synchronous call.
  */
 const state: { range?: { from: number; to: number } } = {}

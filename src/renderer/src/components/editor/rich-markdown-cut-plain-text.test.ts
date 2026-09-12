@@ -132,6 +132,41 @@ describe('cut paths write markdown to the plain-text flavor', () => {
     expect(cutAt(editor, secondPos + 2).getData('text/plain')).toBe('> Line two')
   })
 
+  it('cuts the text a copy of the same list item produces', () => {
+    const editor = createEditor('1. First item\n2. Second item\n3. Third item')
+    const secondPos = findParagraphPos(editor, 'Second item')
+    const second = editor.state.doc.nodeAt(secondPos)
+    if (!second) {
+      throw new Error('list paragraph not found')
+    }
+
+    // The copy path serializes the item's own range with no cut range set,
+    // which is the state ProseMirror's clipboard serialization runs in.
+    const itemFrom = editor.state.doc.resolve(secondPos).before(2)
+    const itemTo = editor.state.doc.resolve(secondPos).after(2)
+    expect(RICH_MARKDOWN_CUT_RANGE.current()).toBeUndefined()
+    const copied = serializeRichMarkdownSliceToMarkdown(
+      getRichMarkdownSliceSerializer(editor),
+      editor.state.doc.slice(itemFrom, itemTo),
+      editor.state.doc.resolve(itemFrom),
+      itemTo
+    )
+
+    const cut = cutAt(editor, secondPos + 2).getData('text/plain')
+
+    expect(cut).toBe(copied)
+    expect(cut).toBe('2. Second item')
+  })
+
+  it('leaves no cut range set once a cut returns', () => {
+    const editor = createEditor(FIXTURE)
+    const bulletPos = findParagraphPos(editor, 'First bullet')
+
+    cutAt(editor, bulletPos + 2)
+
+    expect(RICH_MARKDOWN_CUT_RANGE.current()).toBeUndefined()
+  })
+
   it('falls back to visible text on a view without a serializer', () => {
     const editor = new Editor({
       element: document.createElement('div'),
