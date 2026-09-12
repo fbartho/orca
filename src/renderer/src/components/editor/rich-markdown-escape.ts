@@ -29,12 +29,42 @@ function escapeSource(node: MarkdownNodeLike, mark: { attrs?: Record<string, unk
   return source || Array.from(text, (character) => `\\${character}`).join('')
 }
 
+/** A mark's identity for comparison: its type plus its attrs, in a stable key order. */
+function markIdentity(mark: string | { type?: string; attrs?: Record<string, unknown> }): string {
+  if (typeof mark === 'string') {
+    return JSON.stringify([mark, null])
+  }
+  const attrs = mark?.attrs ?? {}
+  const entries = Object.keys(attrs)
+    .sort()
+    .map((key) => [key, attrs[key]])
+  return JSON.stringify([mark?.type ?? '', entries])
+}
+
+/**
+ * Whether two nodes carry the same marks with the same attrs. The escape mark's own
+ * `source` is excluded: it differs per escape by design, and the merge concatenates
+ * those bytes rather than keeping one.
+ */
+function sameMarkSet(left: MarkdownNodeLike, right: MarkdownNodeLike): boolean {
+  const identities = (node: MarkdownNodeLike): string[] =>
+    (node.marks ?? [])
+      .filter((mark) => (typeof mark === 'string' ? mark : mark?.type) !== ESCAPE_MARK_NAME)
+      .map(markIdentity)
+      .sort()
+  const a = identities(left)
+  const b = identities(right)
+  return a.length === b.length && a.every((identity, index) => identity === b[index])
+}
+
 /**
  * Rewrites each escaped text node to its original bytes and joins runs that sit
- * next to each other. The boundary walk keys active marks by type and compares
- * mark sets by type alone, so consecutive escape marks read as one continuous run
- * and only the first one's delimiter is emitted. Carrying every backslash in the
- * text rather than in a delimiter is what keeps each escape its own.
+ * next to each other under the same marks. The boundary walk keys active marks by
+ * type and compares mark sets by type alone, so consecutive escape marks read as one
+ * continuous run and only the first one's delimiter is emitted. Carrying every
+ * backslash in the text rather than in a delimiter is what keeps each escape its own.
+ * Merging only across an identical mark set is what keeps a link's href from being
+ * dropped when the next escape sits under a different one.
  */
 export function expandEscapeSources(nodes: MarkdownNodeLike[]): MarkdownNodeLike[] {
   const expanded: MarkdownNodeLike[] = []
@@ -46,7 +76,7 @@ export function expandEscapeSources(nodes: MarkdownNodeLike[]): MarkdownNodeLike
     }
     const text = escapeSource(node, mark)
     const previous = expanded.at(-1)
-    if (previous && escapeMarkOf(previous)) {
+    if (previous && escapeMarkOf(previous) && sameMarkSet(previous, node)) {
       expanded[expanded.length - 1] = { ...previous, text: (previous.text ?? '') + text }
       continue
     }

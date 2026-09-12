@@ -1,6 +1,7 @@
 import { Editor } from '@tiptap/core'
 import { describe, expect, it } from 'vitest'
 import { encodeRawMarkdownHtmlForRichEditor } from './raw-markdown-html'
+import { ESCAPE_MARK_NAME, expandEscapeSources } from './rich-markdown-escape'
 import { createRichMarkdownExtensions } from './rich-markdown-extensions'
 import { createRichMarkdownEditorCodec } from './rich-markdown-source-transport'
 
@@ -106,6 +107,69 @@ describe('adjacent escapes', () => {
 
   it.each(ADJACENT_ESCAPE_TEXT)('shows %j as %j', (source, text) => {
     expect(documentText(source)).toBe(text)
+  })
+})
+
+const DIFFERENTLY_MARKED_ADJACENT_ESCAPES = [
+  ['[\\*](http://a.com)\\_'],
+  ['\\*[\\_](http://b.com)'],
+  ['**\\***\\_'],
+  ['**\\***~~\\_~~'],
+  ['~~\\*~~**\\_**']
+]
+
+describe('adjacent escapes under different marks', () => {
+  it.each(DIFFERENTLY_MARKED_ADJACENT_ESCAPES)('keeps %j whole', (source) => {
+    expect(roundTrip(source)).toBe(source)
+  })
+
+  it.each(DIFFERENTLY_MARKED_ADJACENT_ESCAPES)('keeps %j stable across three cycles', (source) => {
+    let current = source
+    for (let cycle = 0; cycle < 3; cycle += 1) {
+      current = roundTrip(current)
+    }
+    expect(current).toBe(source)
+  })
+
+  it('keeps each escape its own node when the surrounding marks differ', () => {
+    const nodes = expandEscapeSources([
+      {
+        type: 'text',
+        text: '*',
+        marks: [
+          { type: ESCAPE_MARK_NAME, attrs: { source: '\\*' } },
+          { type: 'link', attrs: { href: 'http://a.com' } }
+        ]
+      },
+      {
+        type: 'text',
+        text: '_',
+        marks: [
+          { type: ESCAPE_MARK_NAME, attrs: { source: '\\_' } },
+          { type: 'link', attrs: { href: 'http://b.com' } }
+        ]
+      }
+    ])
+    expect(nodes).toHaveLength(2)
+    expect(nodes.map((node) => node.text)).toEqual(['\\*', '\\_'])
+  })
+
+  it('still joins adjacent escapes that carry the same marks', () => {
+    const link = { type: 'link', attrs: { href: 'http://a.com' } }
+    const nodes = expandEscapeSources([
+      {
+        type: 'text',
+        text: '*',
+        marks: [{ type: ESCAPE_MARK_NAME, attrs: { source: '\\*' } }, link]
+      },
+      {
+        type: 'text',
+        text: '_',
+        marks: [{ type: ESCAPE_MARK_NAME, attrs: { source: '\\_' } }, link]
+      }
+    ])
+    expect(nodes).toHaveLength(1)
+    expect(nodes[0]?.text).toBe('\\*\\_')
   })
 })
 
