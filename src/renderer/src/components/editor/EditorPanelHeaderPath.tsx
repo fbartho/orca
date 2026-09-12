@@ -126,6 +126,7 @@ export function EditorPanelHeaderPath({
             onClick={canCopyHeaderPath ? onCopyPath : undefined}
             disabled={!canCopyHeaderPath}
             title={headerCopyState.pathTitle}
+            aria-label={headerCopyState.pathLabel}
           >
             {displayLabel}
           </button>
