@@ -187,14 +187,19 @@ export class RelayOriginPool {
       }
       this.deferredAssignment = null
       if (assignment.cellUrl === origin.cellUrl) {
-        let rebound = false
+            let rebound = false
         try {
           await origin.rebind(this.relayJwt, assignment)
           rebound = true
         } catch {
           // Why: a restarted cell cannot know the prior process's resume secret;
           // after rebind fails, a fresh generation is the only recoverable path.
-          await this.activateTarget(origin, assignment, this.relayJwt, message.graceMs)
+          await this.activateTarget(
+            origin,
+            assignment,
+            this.relayJwt,
+            message.graceMs,
+            )
         }
         if (rebound) {
           this.assertCurrent()
@@ -203,7 +208,12 @@ export class RelayOriginPool {
           this.drainingOrigins.delete(origin)
         }
       } else {
-        await this.activateTarget(origin, assignment, this.relayJwt, message.graceMs)
+        await this.activateTarget(
+          origin,
+          assignment,
+          this.relayJwt,
+          message.graceMs,
+        )
       }
       this.options.onStatus('registered')
       this.drainRetry.reset()
