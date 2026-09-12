@@ -1,11 +1,9 @@
+import { getSeparator } from '@/lib/path'
+
 const ELLIPSIS_PREFIX = '…'
 
 /** Measures rendered width of a candidate string in the element's own font. */
 export type PathWidthMeasurer = (candidate: string) => number
-
-function getSeparator(path: string): '/' | '\\' {
-  return path.includes('\\') ? '\\' : '/'
-}
 
 /**
  * Drops leading path segments until the label fits `availableWidth`, so the
