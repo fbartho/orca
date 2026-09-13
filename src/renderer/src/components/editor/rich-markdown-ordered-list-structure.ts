@@ -58,6 +58,8 @@ type CollectedItem = {
   inNestedRun: boolean
   /** Index of the parent's nested run this item belongs to. */
   run: number
+  /** The item this one nests under, absent at the list's own level. */
+  parent: CollectedItem | undefined
 }
 
 type OpenFrame = { indent: number; column: number; item: CollectedItem }
@@ -101,7 +103,8 @@ function collectOrderedItems(lines: string[]): [CollectedItem[], number] {
         rawLines: [line],
         nestedRuns: 0,
         inNestedRun: false,
-        run: parent === undefined ? 0 : parent.item.nestedRuns - 1
+        run: parent === undefined ? 0 : parent.item.nestedRuns - 1,
+        parent: parent?.item
       }
       items.push(item)
       stack.push({ indent: item.indent, column: item.column, item })
@@ -229,18 +232,19 @@ function trimBlockText(lines: string[]): string {
 /**
  * The slice of an item's descendants that forms one of its nested-list runs: the
  * direct children carrying that run index, each followed by its own descendants.
- * Only direct children's `run` values index this item's runs, so a deeper item is
- * placed by the child it sits under.
+ * A direct child is the one whose `parent` is this item, so a run's members are
+ * fixed by the collector's block context rather than by how deep they sit: a run
+ * that starts at its own indent stays separate from the one before it.
  */
 function nestedRun(
   descendants: CollectedItem[],
-  childIndent: number,
+  parent: CollectedItem,
   run: number
 ): CollectedItem[] {
   const result: CollectedItem[] = []
   let keeping = false
   for (const entry of descendants) {
-    if (entry.indent <= childIndent) {
+    if (entry.parent === parent) {
       keeping = entry.run === run
     }
     if (keeping) {
@@ -250,27 +254,26 @@ function nestedRun(
   return result
 }
 
-/** Turns the collected items at one nesting level into `list_item` tokens. */
+/**
+ * Turns one run of collected items into `list_item` tokens. Every entry is either
+ * emitted as an item of this list or gathered into one of its items' nested runs,
+ * so no collected line is consumed without reaching the tree.
+ */
 function buildListItems(
   items: CollectedItem[],
-  baseIndent: number,
+  owner: CollectedItem | undefined,
   lexer: Lexer
 ): Tokens.ListItem[] {
   const result: Tokens.ListItem[] = []
   let index = 0
   while (index < items.length) {
     const item = items[index]
-    if (item.indent !== baseIndent) {
-      index += 1
-      continue
-    }
     let lookAhead = index + 1
     const nested: CollectedItem[] = []
-    while (lookAhead < items.length && items[lookAhead].indent > baseIndent) {
+    while (lookAhead < items.length && items[lookAhead].parent !== owner) {
       nested.push(items[lookAhead])
       lookAhead += 1
     }
-    const childIndent = nested.length > 0 ? Math.min(...nested.map((entry) => entry.indent)) : 0
     const tokens: Token[] = []
     let mainText = ''
     // Why: an item's own content and its nested lists interleave, so each run of
@@ -298,14 +301,14 @@ function buildListItems(
           tokens.push(...lexer.blockTokens(blockText))
         }
       }
-      const runItems = nestedRun(nested, childIndent, run)
+      const runItems = nestedRun(nested, item, run)
       if (runItems.length > 0) {
         tokens.push({
           type: 'list',
           ordered: true,
           start: runItems[0].number,
           loose: false,
-          items: buildListItems(runItems, childIndent, lexer),
+          items: buildListItems(runItems, item, lexer),
           raw: runItems.map((entry) => entry.rawLines.join('\n')).join('\n')
         } as Tokens.List)
       }
@@ -331,7 +334,7 @@ export function tokenizeOrderedList(source: string, lexer: Lexer): Tokens.List |
   if (items.length === 0) {
     return undefined
   }
-  const listItems = buildListItems(items, items[0].indent, lexer)
+  const listItems = buildListItems(items, items[0].parent, lexer)
   if (listItems.length === 0) {
     return undefined
   }

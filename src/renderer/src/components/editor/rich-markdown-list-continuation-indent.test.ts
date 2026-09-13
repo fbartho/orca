@@ -322,3 +322,88 @@ describe('interleaved content between nested ordered-list runs', () => {
     expect(current).toBe(first)
   })
 })
+
+describe('nested ordered-list runs at differing indents', () => {
+  function itemChildren(source: string): string[] {
+    const [list] = documentContent(source)
+    const item = (list.content ?? [])[0]
+
+    return (item.content ?? []).map((child) => child.type ?? '')
+  }
+
+  it.each([
+    ['1. a\n   1. b\n\n   c\n    1. d'],
+    ['1. a\n   1. b\n\n   c\n     1. d'],
+    ['1. a\n   1. b\n\n   c\n      1. d'],
+    ['10. a\n    1. b\n\n    c\n     1. d'],
+    ['1. a\n   1. b\n   > q\n    1. d'],
+    ['1. a\n   1. b\n\n   c\n    1. d\n2. e']
+  ])('emits the later run of %j instead of consuming it', (source) => {
+    expect(roundTrip(source)).toContain('1. d')
+  })
+
+  it.each([
+    ['1. a\n   1. b\n\n   c\n    1. d'],
+    ['1. a\n   1. b\n\n   c\n     1. d'],
+    ['1. a\n   1. b\n\n   c\n      1. d'],
+    ['10. a\n    1. b\n\n    c\n     1. d']
+  ])('gives %j two sibling nested lists around the block', (source) => {
+    expect(itemChildren(source)).toEqual(['paragraph', 'orderedList', 'paragraph', 'orderedList'])
+  })
+
+  it('keeps a run deeper than the first run out of that run', () => {
+    const [list] = documentContent('1. a\n   1. b\n\n   c\n      1. d')
+    const item = (list.content ?? [])[0]
+    const lists = (item.content ?? []).filter((child) => child.type === 'orderedList')
+
+    expect(lists).toHaveLength(2)
+    for (const nested of lists) {
+      expect(nested.content ?? []).toHaveLength(1)
+    }
+  })
+
+  it.each([
+    ['1. a\n   1. b\n\n   c\n    1. d'],
+    ['1. a\n   1. b\n\n   c\n      1. d'],
+    ['1. a\n   1. b\n   > q\n    1. d']
+  ])('settles %j into a fixed point after one cycle', (source) => {
+    const first = roundTrip(source)
+    let current = first
+    for (let cycle = 0; cycle < 3; cycle += 1) {
+      current = roundTrip(current)
+    }
+
+    expect(current).toBe(first)
+  })
+})
+
+describe('no source line is consumed without being emitted', () => {
+  const CORPUS = [
+    '1. a\n   1. b\n\n   c\n   1. d',
+    '1. a\n   1. b\n\n   c\n    1. d',
+    '1. a\n   1. b\n\n   c\n     1. d',
+    '1. a\n   1. b\n\n   c\n      1. d',
+    '1. a\n   1. b\n   > q\n    1. d',
+    '1. a\n   1. b\n\n   c\n    1. d\n2. e',
+    '10. a\n    1. b\n\n    c\n     1. d',
+    '10. a\n    1. b\n\n    c\n    1. d',
+    '1. a\n   1. b\n\n   c\n   1. d\n\n   e\n   1. f',
+    '1. a\n   1. b\n      1. c\n\n      x\n      1. e',
+    '1. z\n2. a\n   1. b\n\n   c\n   1. d',
+    '1. a\n   1. b\n\n   c\n   1. d\n2. e\n   1. f\n\n   g\n   1. h',
+    '1. a\n   1. b\n\n   ```\n   fenced\n   ```\n\n   1. d',
+    '1. a\n   - b\n\n   c\n    - d',
+    '- a\n  1. b\n\n  c\n   1. d'
+  ]
+
+  it.each(CORPUS)('keeps every non-blank line of %j in the output', (source) => {
+    const output = roundTrip(source)
+    const missing = source
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line !== '')
+      .filter((line) => !output.includes(line.replace(/^\d+\.\s+/, '').trim()))
+
+    expect(missing).toEqual([])
+  })
+})
