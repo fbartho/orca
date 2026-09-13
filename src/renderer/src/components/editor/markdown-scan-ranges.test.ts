@@ -1,6 +1,11 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { findDetailsBlockStart } from './details-markdown-html'
 import { markdownCodeSpanRanges, markdownFenceRanges } from './markdown-scan-ranges'
+import * as markdownScanRanges from './markdown-scan-ranges'
+
+afterEach(() => {
+  vi.restoreAllMocks()
+})
 
 describe('markdownCodeSpanRanges', () => {
   it('reports a span whose backtick run closes on an equal run', () => {
@@ -79,7 +84,11 @@ describe('findDetailsBlockStart with fenced content', () => {
 describe('findDetailsBlockStart cost on documents without a toggle', () => {
   // marked calls the start hook once per paragraph over the remaining source,
   // so a full range scan per call makes parsing quadratic in document size.
-  it('parses a large toggle-free document within a generous bound', () => {
+  // A wall-clock bound can pass with the early exit removed on a fast machine,
+  // so the guard asserts the scan functions are never invoked instead.
+  it('never scans fence or code-span ranges for a toggle-free document', () => {
+    const fenceSpy = vi.spyOn(markdownScanRanges, 'markdownFenceRanges')
+    const codeSpanSpy = vi.spyOn(markdownScanRanges, 'markdownCodeSpanRanges')
     const paragraphs = Array.from(
       { length: 300 },
       (_, index) => `Paragraph ${index} ${'lorem ipsum dolor sit amet '.repeat(25)}`
@@ -87,15 +96,61 @@ describe('findDetailsBlockStart cost on documents without a toggle', () => {
     const document = paragraphs.join('\n\n')
     expect(document.length).toBeGreaterThan(200_000)
 
-    const started = performance.now()
     let offset = 0
     for (const paragraph of paragraphs) {
       expect(findDetailsBlockStart(document.slice(offset))).toBe(-1)
       offset += paragraph.length + 2
     }
 
-    expect(performance.now() - started).toBeLessThan(1_000)
+    expect(fenceSpy).not.toHaveBeenCalled()
+    expect(codeSpanSpy).not.toHaveBeenCalled()
   })
+
+  it('scans ranges only for calls whose remaining source holds the toggle', () => {
+    const fenceSpy = vi.spyOn(markdownScanRanges, 'markdownFenceRanges')
+    const codeSpanSpy = vi.spyOn(markdownScanRanges, 'markdownCodeSpanRanges')
+    // The toggle is the trailing paragraph, so every remaining-source slice
+    // still contains it — all 300 calls scan, none is skipped by the guard.
+    const paragraphs = Array.from({ length: 300 }, (_, index) => `Paragraph ${index}.`)
+    paragraphs.push('<details>\n<summary>S</summary>\n\nbody\n\n</details>')
+    const document = paragraphs.join('\n\n')
+
+    let offset = 0
+    let found = -1
+    for (const paragraph of paragraphs) {
+      const relative = findDetailsBlockStart(document.slice(offset))
+      if (relative !== -1) {
+        found = offset + relative
+      }
+      offset += paragraph.length + 2
+    }
+
+    expect(found).toBe(document.indexOf('<details>'))
+    expect(fenceSpy).toHaveBeenCalledTimes(paragraphs.length)
+    expect(codeSpanSpy).toHaveBeenCalledTimes(paragraphs.length)
+  })
+
+  // Opt-in only: `ORCA_DETAILS_SCAN_BENCH=1 pnpm test markdown-scan-ranges` to
+  // read wall-clock cost. Not a CI gate — the scan-count assertions above are.
+  it.skipIf(process.env.ORCA_DETAILS_SCAN_BENCH !== '1')(
+    'benchmarks a large toggle-free document',
+    () => {
+      const paragraphs = Array.from(
+        { length: 300 },
+        (_, index) => `Paragraph ${index} ${'lorem ipsum dolor sit amet '.repeat(25)}`
+      )
+      const document = paragraphs.join('\n\n')
+
+      const started = performance.now()
+      let offset = 0
+      for (const paragraph of paragraphs) {
+        expect(findDetailsBlockStart(document.slice(offset))).toBe(-1)
+        offset += paragraph.length + 2
+      }
+
+      process.stdout.write(`${JSON.stringify({ elapsedMs: performance.now() - started })}\n`)
+    }
+  )
 
   it('still finds a toggle that follows a long run of prose', () => {
     const prose = Array.from({ length: 300 }, (_, index) => `Paragraph ${index}.`).join('\n\n')
