@@ -43,8 +43,21 @@ const SHAPES = [
   ['9. Nine item\n   cont nine.\n10. Ten item\n    cont ten.'],
   ['1. Outer\n   cont outer.\n   1. Inner\n      cont inner.'],
   ['1. Item with a block\n\n   A second paragraph inside.'],
+  ['10. Item with a block\n\n    A second paragraph inside.'],
   ['100. Three digit\n     cont three.']
 ]
+
+/** A list item holding a later block, one shape per marker width. */
+const BLOCK_SHAPES = [
+  '- Bullet item\n\n  A second paragraph inside.',
+  '1. Item with a block\n\n   A second paragraph inside.',
+  '10. Item with a block\n\n    A second paragraph inside.',
+  '100. Item with a block\n\n     A second paragraph inside.'
+]
+
+function containsCodeBlock(nodes: JSONContent[]): boolean {
+  return nodes.some((node) => node.type === 'codeBlock' || containsCodeBlock(node.content ?? []))
+}
 
 describe('list continuation round trip', () => {
   it.each(SHAPES)('preserves %j', (source) => {
@@ -374,6 +387,19 @@ describe('nested ordered-list runs at differing indents', () => {
     }
 
     expect(current).toBe(first)
+  })
+})
+
+describe('a list item block never crosses the indented-code threshold', () => {
+  it.each(BLOCK_SHAPES)('keeps %j a paragraph across three cycles', (source) => {
+    let current = source
+    for (let cycle = 0; cycle < 3; cycle += 1) {
+      current = roundTrip(current)
+      // Why: four columns of indent reads as an indented code block, so an indent
+      // that grows per cycle turns the paragraph into code rather than losing spaces.
+      expect(containsCodeBlock(documentContent(current))).toBe(false)
+    }
+    expect(current).toBe(source)
   })
 })
 

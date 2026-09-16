@@ -2,10 +2,6 @@ import type { JSONContent, MarkdownRendererHelpers, RenderContext } from '@tipta
 import { ListItem } from '@tiptap/extension-list'
 import { applyContinuationIndent } from './rich-markdown-list-continuation-indent'
 
-// Why: the serializer's indent helper prepends a fixed two spaces, which is the
-// marker width only for a bullet or a single-digit ordered item.
-const BASE_INDENT = 2
-
 const baseRenderMarkdown = ListItem.config.renderMarkdown as (
   node: JSONContent,
   helpers: MarkdownRendererHelpers,
@@ -40,7 +36,7 @@ function withZeroStartMarker(rendered: string, context: RenderContext): string {
 
 /**
  * Number of lines the item's own first paragraph occupies. The serializer leaves
- * that run unindented and indents every later child by a fixed two columns, so the
+ * that run unindented while aligning every later child to the marker column, so the
  * two runs need different treatment and only the paragraph's own line count
  * separates them.
  */
@@ -65,11 +61,8 @@ export const RichMarkdownListItem = ListItem.extend({
     )
     const blockStart = paragraphLineCount(node)
     // Why: the serializer never indents the newlines inside the item's own first
-    // paragraph, and indents every later child by a fixed two columns.
+    // paragraph, though it aligns every later child to the marker column.
     const paragraph = applyContinuationIndent(lines.slice(0, blockStart).join('\n'), width)
-    const blocks = lines
-      .slice(blockStart)
-      .map((line) => (line === '' ? line : `${' '.repeat(width - BASE_INDENT)}${line}`))
-    return [paragraph, ...blocks].join('\n')
+    return [paragraph, ...lines.slice(blockStart)].join('\n')
   }
 })
