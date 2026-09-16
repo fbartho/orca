@@ -48,6 +48,34 @@ describe('MessageRow control visibility', () => {
     await waitFor(() => {
       expect(writeClipboardText).toHaveBeenCalledWith('const answer = 42\n')
     })
+
+    // The reset selector on the wrapper only reaches <code> that is its
+    // descendant, so the fenced block's <code> must render underneath it.
+    const bodyRoot = screen.getByText('ts').closest('div.group\\/code')!.parentElement!
+    expect(bodyRoot).toHaveClass('tabular-nums', '[&_code]:[font-variant-numeric:normal]')
+    expect(bodyRoot.querySelector('pre code')).toBeInTheDocument()
+  })
+
+  it('renders inline code under the message body wrapper carrying the numeral reset', () => {
+    render(
+      <MessageRow
+        message={{
+          id: 'message',
+          role: 'assistant',
+          timestamp: 0,
+          source: 'transcript',
+          blocks: [{ type: 'text', text: 'Use `foo()` here' }]
+        }}
+        expandSignal={false}
+        onScrollMessageToTop={vi.fn()}
+      />
+    )
+
+    const codeEl = screen.getByText('foo()')
+    expect(codeEl.tagName).toBe('CODE')
+    const bodyRoot = codeEl.closest('.tabular-nums')
+    expect(bodyRoot).toHaveClass('tabular-nums', '[&_code]:[font-variant-numeric:normal]')
+    expect(bodyRoot).toContainElement(codeEl)
   })
 
   it('appends time to the existing agent controls and inherits their reveal', () => {
