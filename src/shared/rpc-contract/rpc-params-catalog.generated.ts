@@ -3,6 +3,11 @@
 import type { z } from 'zod'
 import { AgentSkillShareRequestSchema } from '../agent-skill-sharing-contract'
 import {
+  AiVaultSearchRequestSchema,
+  AiVaultSearchStatusRequestSchema,
+  AiVaultSetSearchEnabledParamsSchema
+} from '../ai-vault-search-contract'
+import {
   BrowserClientFileChannelAbortParams,
   BrowserClientFileChannelReadParams,
   BrowserClientFileChannelWriteParams
@@ -45,6 +50,7 @@ import {
 } from './automation-params'
 import { CertificateProceed } from './browser-core-params'
 import { MouseClick } from './browser-extras-params'
+import { BrowserIdentitySet, ProfileCreate } from './browser-identity-params'
 import {
   Check,
   ClipboardWrite,
@@ -71,7 +77,6 @@ import {
   MouseButton,
   MouseWheel,
   MouseXY,
-  ProfileCreate,
   ProfileDelete,
   ProfileImportFromBrowser,
   Screencast,
@@ -165,6 +170,7 @@ import {
   FileListAll,
   FileOpenDiff,
   FilePathSearch,
+  FilePathsExist,
   FileReadChunk,
   FileSearch,
   FileTreePath,
@@ -577,6 +583,9 @@ export const RPC_PARAMS_BY_METHOD = {
   'aiVault.listSessions': AiVaultListSessionsParams,
   'aiVault.prepareSessionResume': AiVaultPrepareSessionResumeParams,
   'aiVault.resolveSessionTitles': AiVaultSessionTitlesParams,
+  'aiVault.searchSessions': AiVaultSearchRequestSchema,
+  'aiVault.searchStatus': AiVaultSearchStatusRequestSchema,
+  'aiVault.setSearchEnabled': AiVaultSetSearchEnabledParamsSchema,
   'artifacts.delete': ArtifactsDeleteParams,
   'artifacts.getPublishedLink': SourceRequest,
   'artifacts.list': ListOptions,
@@ -627,6 +636,8 @@ export const RPC_PARAMS_BY_METHOD = {
   'browser.goto': Goto,
   'browser.highlight': Highlight,
   'browser.hover': Element,
+  'browser.identity.get': null,
+  'browser.identity.set': BrowserIdentitySet,
   'browser.intercept.disable': BrowserTarget,
   'browser.intercept.enable': InterceptEnable,
   'browser.intercept.list': BrowserTarget,
@@ -731,6 +742,7 @@ export const RPC_PARAMS_BY_METHOD = {
   'files.listMarkdownDocuments': WorktreeSelector,
   'files.open': FileOpen,
   'files.openDiff': FileOpenDiff,
+  'files.pathsExist': FilePathsExist,
   'files.read': FileOpen,
   'files.readChunk': FileReadChunk,
   'files.readDir': FileTreePath,
@@ -1152,6 +1164,7 @@ export const RPC_PARAMS_BY_METHOD = {
 // Why: these methods bind a schema the shared contract cannot hold because its value
 // graph reaches into src/main. Listing them keeps the gap visible instead of absent.
 export const RPC_METHODS_WITHOUT_SHARED_PARAMS: readonly string[] = [
+  'agent.launch',
   'emulator.install',
   'orchestration.send',
   'orchestration.taskUpdate'
