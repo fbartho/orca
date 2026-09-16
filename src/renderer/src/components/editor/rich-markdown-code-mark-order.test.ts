@@ -54,4 +54,14 @@ describe('code mark ordering', () => {
   it('keeps the two nestings distinct', () => {
     expect(roundTrip('**`a`**')).not.toBe(roundTrip('`**a**`'))
   })
+
+  it.each([
+    ['**`x`**', '**'],
+    ['*`x`*', '*'],
+    ['~~`x`~~', '~~']
+  ])('opens %j with its emphasis delimiter rather than the backtick', (source, delimiter) => {
+    // Why: the serializer opens the lower-ranked mark outermost and rank follows
+    // priority, so raising code above emphasis puts the backticks on the outside.
+    expect(roundTrip(source).startsWith(delimiter)).toBe(true)
+  })
 })
