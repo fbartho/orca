@@ -10,6 +10,8 @@ import { tokenizeOrderedList } from './rich-markdown-ordered-list-structure'
 
 const orderedListStart = new RegExp(`^\\s*(?:${ORDERED_LIST_MARKER_PATTERN})[.)]\\s`)
 
+const numericDotStart = /^\s*\d+\.\s/
+
 const baseTokenizer = OrderedList.config.markdownTokenizer as MarkdownTokenizer
 const baseParseMarkdown = OrderedList.config.parseMarkdown as (
   token: MarkdownToken,
@@ -36,10 +38,15 @@ function withParsedStart(parsed: MarkdownParseResult, start: unknown): MarkdownP
 export const RichMarkdownOrderedList = OrderedList.extend({
   markdownTokenizer: {
     ...baseTokenizer,
-    tokenize(src, _tokens, lexer) {
+    tokenize(src, tokens, lexer) {
       // Why: the base tokenizer scans the full remaining source before rejecting a non-list.
       if (!orderedListStart.test(src)) {
         return undefined
+      }
+      // Why: the structural tokenizer reads decimal markers only, so an alphabetic
+      // or Roman list keeps its own nesting by going to the base tokenizer.
+      if (!numericDotStart.test(src)) {
+        return baseTokenizer.tokenize(src, tokens, lexer)
       }
       return tokenizeOrderedList(src, lexer as unknown as Lexer)
     }

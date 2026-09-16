@@ -1,9 +1,13 @@
 import type { MarkdownLexerConfiguration, MarkdownTokenizer } from '@tiptap/core'
+import { Editor } from '@tiptap/core'
 import type { Tokens } from 'marked'
 import { OrderedList } from '@tiptap/extension-list'
 import TaskList from '@tiptap/extension-task-list'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { encodeRawMarkdownHtmlForRichEditor } from './raw-markdown-html'
+import { createRichMarkdownExtensions } from './rich-markdown-extensions'
 import { RichMarkdownOrderedList } from './rich-markdown-ordered-list'
+import { createRichMarkdownEditorCodec } from './rich-markdown-source-transport'
 import { RichMarkdownTaskList } from './rich-markdown-task-list'
 
 const lexer: MarkdownLexerConfiguration = {
@@ -13,6 +17,25 @@ const lexer: MarkdownLexerConfiguration = {
 
 function getTokenizer(extension: typeof OrderedList | typeof TaskList): MarkdownTokenizer {
   return extension.config.markdownTokenizer as MarkdownTokenizer
+}
+
+/** Round-trips `source` through the full editor with `orderedList` swapped in. */
+function roundTripWithOrderedList(orderedList: typeof OrderedList, source: string): string {
+  const codec = createRichMarkdownEditorCodec()
+  const extensions = createRichMarkdownExtensions({ codec }).map((extension) =>
+    extension.name === 'orderedList' ? orderedList : extension
+  )
+  const editor = new Editor({
+    element: null,
+    extensions,
+    content: encodeRawMarkdownHtmlForRichEditor(source, codec),
+    contentType: 'markdown'
+  })
+  try {
+    return editor.getMarkdown().trimEnd()
+  } finally {
+    editor.destroy()
+  }
 }
 
 afterEach(() => {
@@ -65,14 +88,26 @@ describe('rich markdown list tokenizers', () => {
     expect(nested.items.map((item) => item.raw)).toEqual(['   1. child', '   2. child two'])
   })
 
-  it.each(['a. first\nb. second\n', 'I. first\nII. second\n', '  3. indented\n'])(
-    'preserves upstream ordered marker support for %j',
-    (source) => {
-      expect(getTokenizer(RichMarkdownOrderedList).tokenize(source, [], lexer)).toEqual(
-        getTokenizer(OrderedList).tokenize(source, [], lexer)
-      )
-    }
-  )
+  it.each([
+    'a. first\nb. second',
+    'I. first\nII. second',
+    'A. upper\nB. two',
+    'i. lower\nii. two',
+    '1) paren\n2) two',
+    '  3. indented',
+    'a. outer\n   1. nested'
+  ])('renders %j the same as the upstream ordered list', (source) => {
+    // Why: the structural tokenizer emits a token shape of its own, so marker
+    // handling is pinned by what reaches the document rather than by token fields.
+    expect(roundTripWithOrderedList(RichMarkdownOrderedList, source)).toBe(
+      roundTripWithOrderedList(OrderedList, source)
+    )
+  })
+
+  it('keeps a numeric child nested under a non-numeric parent', () => {
+    const source = 'a. outer\n   1. nested'
+    expect(roundTripWithOrderedList(RichMarkdownOrderedList, source)).toBe(source)
+  })
 
   it('does not advertise mid-paragraph numbers as list starts', () => {
     const start = getTokenizer(RichMarkdownOrderedList).start
