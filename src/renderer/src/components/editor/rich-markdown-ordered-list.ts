@@ -4,9 +4,11 @@ import type {
   MarkdownToken,
   MarkdownTokenizer
 } from '@tiptap/core'
-import { OrderedList } from '@tiptap/extension-list'
+import { OrderedList, ORDERED_LIST_MARKER_PATTERN } from '@tiptap/extension-list'
 import type { Lexer } from 'marked'
 import { tokenizeOrderedList } from './rich-markdown-ordered-list-structure'
+
+const orderedListStart = new RegExp(`^\\s*(?:${ORDERED_LIST_MARKER_PATTERN})[.)]\\s`)
 
 const baseTokenizer = OrderedList.config.markdownTokenizer as MarkdownTokenizer
 const baseParseMarkdown = OrderedList.config.parseMarkdown as (
@@ -36,7 +38,7 @@ export const RichMarkdownOrderedList = OrderedList.extend({
     ...baseTokenizer,
     tokenize(src, _tokens, lexer) {
       // Why: the base tokenizer scans the full remaining source before rejecting a non-list.
-      if (typeof baseTokenizer.start === 'function' && baseTokenizer.start(src) !== 0) {
+      if (!orderedListStart.test(src)) {
         return undefined
       }
       return tokenizeOrderedList(src, lexer as unknown as Lexer)
