@@ -1,7 +1,7 @@
 import { Editor } from '@tiptap/core'
 import { describe, expect, it } from 'vitest'
 import { encodeRawMarkdownHtmlForRichEditor } from './raw-markdown-html'
-import { ESCAPE_MARK_NAME, expandEscapeSources } from './rich-markdown-escape'
+import { ESCAPE_MARK_NAME, expandEscapeSources, RichMarkdownEscape } from './rich-markdown-escape'
 import { createRichMarkdownExtensions } from './rich-markdown-extensions'
 import { createRichMarkdownEditorCodec } from './rich-markdown-source-transport'
 
@@ -170,6 +170,39 @@ describe('adjacent escapes under different marks', () => {
     ])
     expect(nodes).toHaveLength(1)
     expect(nodes[0]?.text).toBe('\\*\\_')
+  })
+})
+
+describe('adjacent escapes stay separate in the document', () => {
+  function escapeSources(source: string): string[] {
+    const editor = createEditor(source)
+    try {
+      const sources: string[] = []
+      editor.state.doc.descendants((node) => {
+        const mark = node.marks.find((candidate) => candidate.type.name === ESCAPE_MARK_NAME)
+        if (mark) {
+          sources.push(String(mark.attrs.source ?? ''))
+        }
+        return true
+      })
+      return sources
+    } finally {
+      editor.destroy()
+    }
+  }
+
+  it.each([
+    ['a\\*\\*b', ['\\*', '\\*']],
+    ['\\*\\*\\*', ['\\*', '\\*', '\\*']],
+    ['\\_\\_', ['\\_', '\\_']]
+  ])('reads %j as one source per escape', (source, expected) => {
+    expect(escapeSources(source)).toEqual(expected)
+  })
+
+  it('does not parse the markdown token type the library handles itself', () => {
+    // Why: the library converts a marked `escape` token to plain text before the
+    // handler registry runs, so reclaiming that name silently drops every escape.
+    expect(RichMarkdownEscape.config.markdownTokenName).not.toBe('escape')
   })
 })
 

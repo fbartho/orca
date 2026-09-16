@@ -4,8 +4,15 @@ import type { MarkdownNodeLike } from './rich-markdown-mark-boundary-walk'
 
 export const ESCAPE_MARK_NAME = 'richMarkdownEscape'
 
+/** The markdown token type the mark parses, distinct from marked's own `escape`. */
+export const ESCAPE_TOKEN_NAME = 'orcaMarkdownEscape'
+
 const SOURCE_ATTRIBUTE = 'data-orca-markdown-escape-source'
+const OFFSET_ATTRIBUTE = 'data-orca-markdown-escape-offset'
 const MARKER_ATTRIBUTE = 'data-rich-markdown-escape'
+
+// CommonMark section 2.4: a backslash escapes any ASCII punctuation character.
+const ESCAPABLE = /^\\([!-/:-@[-`{-~])/
 
 function escapeMarkOf(
   node: MarkdownNodeLike
@@ -86,8 +93,7 @@ export function expandEscapeSources(nodes: MarkdownNodeLike[]): MarkdownNodeLike
 }
 
 /**
- * Carries a backslash escape through the document. The parser drops marked's
- * `escape` token because nothing handles it, so `Veri\*Factu` loses both the
+ * Carries a backslash escape through the document, so `Veri\*Factu` keeps both the
  * backslash and the asterisk. Holding the original bytes on a mark is what keeps
  * the escape stable: emitting the bare character alone lets the next parse read
  * `\_x\_` back as emphasis. A mark rather than a node because the serializer's
@@ -108,18 +114,44 @@ export const RichMarkdownEscape = Mark.create({
         default: '',
         parseHTML: (element) => element.getAttribute(SOURCE_ATTRIBUTE) ?? '',
         renderHTML: (attributes) => ({ [SOURCE_ATTRIBUTE]: String(attributes.source ?? '') })
+      },
+      // Why: the parser joins adjacent text nodes whose marks compare equal, which
+      // would fold two escapes into one source. How much source was left when the
+      // escape was read differs for every escape in a paragraph, so it keeps them apart.
+      offset: {
+        default: 0,
+        parseHTML: (element) => Number(element.getAttribute(OFFSET_ATTRIBUTE) ?? 0),
+        renderHTML: (attributes) => ({ [OFFSET_ATTRIBUTE]: String(attributes.offset ?? 0) })
       }
     }
   },
 
-  markdownTokenName: 'escape',
+  markdownTokenName: ESCAPE_TOKEN_NAME,
+  // Why: the library converts a marked `escape` token to plain text before it
+  // consults the handler registry, so the escape needs a token type of its own.
+  markdownTokenizer: {
+    name: ESCAPE_TOKEN_NAME,
+    level: 'inline',
+    start: (src: string) => {
+      const index = src.indexOf('\\')
+      return index === -1 ? -1 : index
+    },
+    tokenize: (src: string) => {
+      const match = ESCAPABLE.exec(src)
+      if (!match) {
+        return undefined
+      }
+      return { type: ESCAPE_TOKEN_NAME, raw: match[0], text: match[1], offset: src.length }
+    }
+  },
   parseMarkdown: (token, helpers) => {
     const source = typeof token.raw === 'string' ? token.raw : ''
     const text = typeof token.text === 'string' ? token.text : ''
     if (!source || !text) {
       return []
     }
-    return helpers.applyMark(ESCAPE_MARK_NAME, [helpers.createTextNode(text)], { source })
+    const offset = typeof token.offset === 'number' ? token.offset : 0
+    return helpers.applyMark(ESCAPE_MARK_NAME, [helpers.createTextNode(text)], { source, offset })
   },
   // Why: the escaped bytes travel in the text node, so the mark itself adds no
   // delimiter; rendering no placeholder is what makes the walk emit none.
