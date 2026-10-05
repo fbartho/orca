@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { test, expect } from './helpers/orca-app'
@@ -145,8 +145,17 @@ test.describe('Wide code blocks scroll horizontally', () => {
           path: testInfo.outputPath(`wide-code-${kind}.png`),
           animations: 'disabled'
         })
+        const metricsPath = testInfo.outputPath('wide-code-metrics.json')
+        writeFileSync(
+          metricsPath,
+          JSON.stringify(
+            { kind, metrics, proseMetrics, savedMarkdown: readFileSync(savedPath, 'utf8') },
+            null,
+            2
+          )
+        )
         await testInfo.attach('wide-code-metrics', {
-          body: JSON.stringify({ metrics, proseMetrics }),
+          path: metricsPath,
           contentType: 'application/json'
         })
         await orcaPage.setViewportSize({ width: 900, height: 700 })
