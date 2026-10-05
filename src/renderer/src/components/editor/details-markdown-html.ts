@@ -54,9 +54,7 @@ export function escapeDetailsHtml(value: string): string {
     .replaceAll('"', '&quot;')
 }
 
-// Why: only this exact class value reaches here — any other class fails
-// hasOnlySupportedDetailsAttributes and the block is kept as passthrough
-// html instead, so its source bytes are never rewritten by this parser.
+// Only validated source classes reach this parser; other attributes stay passthrough HTML.
 const LEGACY_STYLING_CLASS_PATTERN =
   /\sclass\s*=\s*(?:"orca-details"|'orca-details'|orca-details)(?=\s|$)/i
 
@@ -83,11 +81,7 @@ export function detailsBodyHtmlToMarkdown(body: string): string {
     .trim()
 }
 
-// Why: the styling class is applied to the rendered DOM node independently
-// (OrcaDetails' HTMLAttributes config), so a block created fresh in the
-// editor never gets the class written into its markdown source. A block
-// whose source already carried the class keeps carrying it, so re-saving
-// a file written by an earlier Orca version doesn't change its bytes.
+// Preserve a source-authored class without copying the rendered styling hook into new blocks.
 export function renderDetailsAttributes(attrs: Record<string, unknown> | undefined): string {
   const attributes: string[] = []
 
@@ -219,7 +213,8 @@ export function normalizeDetailsOpeningTag(fragment: string): string {
   if (!match || !hasOnlySupportedDetailsAttributes(attributes)) {
     return fragment
   }
-  return `<details ${renderDetailsAttributes(parseDetailsAttributes(attributes))}>`
+  const rendered = renderDetailsAttributes(parseDetailsAttributes(attributes))
+  return rendered ? `<details ${rendered}>` : '<details>'
 }
 
 function hasOnlyPlainParagraphAndBreakTags(content: string): boolean {

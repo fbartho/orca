@@ -216,10 +216,7 @@ const OrcaDetails = Details.extend({
           return parsed ? { 'data-orca-toggle': parsed } : {}
         }
       },
-      // Why: a block saved by an Orca version that wrote `class="orca-details"`
-      // into markdown must keep carrying that class on every subsequent save,
-      // or the round-trip eligibility check no longer recognizes its own file.
-      // Not a DOM attribute — the rendered class comes from HTMLAttributes.
+      // Source provenance must not inherit the class present on every rendered node.
       hasLegacyStylingClass: {
         default: false,
         parseHTML: () => false,
