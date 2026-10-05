@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { expect, test } from './helpers/orca-app'
@@ -93,6 +93,7 @@ for (const kind of ['git', 'folder'] as const) {
     const save = `${isMac ? 'Meta' : 'Control'}+s`
     await orcaPage.keyboard.press(save)
     await expect.poll(() => readFileSync(freshPath, 'utf8')).toContain('Fresh body')
+    writeFileSync(testInfo.outputPath('fresh-details.md'), readFileSync(freshPath))
     await testInfo.attach('fresh-details.md', {
       body: readFileSync(freshPath),
       contentType: 'text/markdown'
@@ -142,6 +143,10 @@ for (const kind of ['git', 'folder'] as const) {
       await openFixture(filePath)
       editor = await waitForRichMarkdownEditor(orcaPage)
       await expect(editor.locator('[data-type="detailsContent"] p')).toHaveText('Body edited')
+      writeFileSync(
+        testInfo.outputPath(legacy ? 'legacy-details.md' : 'plain-details.md'),
+        readFileSync(filePath)
+      )
       await testInfo.attach(legacy ? 'legacy-details.md' : 'plain-details.md', {
         body: readFileSync(filePath),
         contentType: 'text/markdown'
